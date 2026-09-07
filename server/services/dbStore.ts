@@ -96,7 +96,7 @@ export interface FinTrackData {
   };
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = process.env.VERCEL ? '/tmp/data' : path.join(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'fintrack_data.json');
 
 const DEFAULT_CATEGORIES: Omit<DbCategory, 'id' | 'user_id' | 'created_at' | 'updated_at'>[] = [
@@ -117,8 +117,12 @@ const DEFAULT_CATEGORIES: Omit<DbCategory, 'id' | 'user_id' | 'created_at' | 'up
 let memoryDb: FinTrackData | null = null;
 
 function ensureDirectoryExists(dir: string) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  try {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  } catch (err) {
+    console.warn(`Failed to create directory ${dir}:`, err);
   }
 }
 
