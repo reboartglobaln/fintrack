@@ -4,6 +4,7 @@
  */
 import { Sequelize } from 'sequelize';
 import dotenv from 'dotenv';
+import pg from 'pg';
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ const sslEnabled =
 export const sequelize = databaseUrl
   ? new Sequelize(databaseUrl, {
       dialect: 'postgres',
+      dialectModule: pg,
       logging: false,
       pool: {
         max: 10,
@@ -42,6 +44,7 @@ export const sequelize = databaseUrl
       host: dbHost,
       port: dbPort,
       dialect: 'postgres',
+      dialectModule: pg,
       logging: isProduction ? false : (msg) => console.log(`[Sequelize] ${msg}`),
       pool: {
         max: 10,
