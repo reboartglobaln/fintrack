@@ -15,6 +15,9 @@ const dbPassword = process.env.DB_PASSWORD || 'postgres';
 const dbName = process.env.DB_NAME || 'fintrack_db';
 const isProduction = process.env.NODE_ENV === 'production';
 const isSupabaseHost = (databaseUrl && databaseUrl.includes('supabase')) || dbHost.includes('supabase');
+const sslEnabled =
+  process.env.DB_SSL === 'true' ||
+  (process.env.DB_SSL !== 'false' && (isSupabaseHost || (databaseUrl && /neon|supabase|render|aws/i.test(databaseUrl))));
 
 export const sequelize = databaseUrl
   ? new Sequelize(databaseUrl, {
@@ -26,12 +29,14 @@ export const sequelize = databaseUrl
         acquire: 30000,
         idle: 10000,
       },
-      dialectOptions: {
-        ssl: {
-          require: true,
-          rejectUnauthorized: false,
-        },
-      },
+      dialectOptions: sslEnabled
+        ? {
+            ssl: {
+              require: true,
+              rejectUnauthorized: false,
+            },
+          }
+        : {},
     })
   : new Sequelize(dbName, dbUser, dbPassword, {
       host: dbHost,
@@ -44,7 +49,7 @@ export const sequelize = databaseUrl
         acquire: 30000,
         idle: 10000,
       },
-      dialectOptions: isSupabaseHost || isProduction
+      dialectOptions: sslEnabled
         ? {
             ssl: {
               require: true,
