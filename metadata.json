@@ -1,0 +1,6 @@
+{
+  "name": "FinTrack - Personal Finance Tracker",
+  "description": "Aplikasi manajemen dan pencatatan keuangan pribadi modern dengan registrasi dan login akun Google, analitik visual, budgeting, pencatatan otomatis via WhatsApp dan Telegram, recurring rules, multi-currency, dan laporan keuangan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

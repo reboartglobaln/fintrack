@@ -1,0 +1,35 @@
+# Multi-stage Dockerfile for Backend (Node.js + Express + Sequelize)
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy dependency definition
+COPY package*.json ./
+RUN npm ci
+
+# Copy application source
+COPY . .
+
+# Build backend and bundle with esbuild
+RUN npm run build
+
+# Production runtime stage
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+
+COPY package*.json ./
+RUN npm ci --only=production
+
+# Copy compiled build output
+COPY --from=builder /app/dist ./dist
+
+# Non-root user for security
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+
+EXPOSE 3000
+
+CMD ["node", "dist/server.cjs"]
