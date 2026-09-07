@@ -82,12 +82,24 @@ app.use('/api', errorHandler);
 
 // 3. Vite Middleware (Development) / Static Files (Production)
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+  const isDev = process.env.NODE_ENV === 'development';
+  const isProductionBundle = typeof __filename !== 'undefined' && __filename.endsWith('.cjs');
+
+  if (isDev && !isProductionBundle) {
+    try {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (e) {
+      console.warn('Vite dev middleware not available, falling back to static files.');
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));

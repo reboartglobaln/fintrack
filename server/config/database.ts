@@ -59,10 +59,30 @@ export const sequelize = databaseUrl
         : {},
     });
 
+import fs from 'fs';
+import path from 'path';
+
+export const initDatabaseSchema = async (): Promise<boolean> => {
+  try {
+    const schemaPath = path.join(process.cwd(), 'database', 'schema.sql');
+    if (fs.existsSync(schemaPath)) {
+      const sql = fs.readFileSync(schemaPath, 'utf8');
+      await sequelize.query(sql);
+      console.log('✅ Database Schema verified and synchronized automatically from schema.sql.');
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.warn('⚠️ Auto-schema sync note:', (err as Error).message);
+    return false;
+  }
+};
+
 export const testDbConnection = async (): Promise<boolean> => {
   try {
     await sequelize.authenticate();
     console.log('✅ PostgreSQL/Supabase Database connected successfully via Sequelize.');
+    await initDatabaseSchema();
     return true;
   } catch (error) {
     console.warn('ℹ️ PostgreSQL/Supabase direct connection note (falling back to JSON/API mode if unset):', (error as Error).message);

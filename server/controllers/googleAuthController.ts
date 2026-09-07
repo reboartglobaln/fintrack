@@ -14,12 +14,17 @@ export const getGoogleRedirectUri = (req: Request): string => {
     return `${originQuery.replace(/\/$/, '')}/auth/callback`;
   }
 
-  // Fallback to APP_URL environment variable
-  if (process.env.APP_URL) {
+  // Fallback to APP_URL environment variable (ignore placeholder)
+  if (process.env.APP_URL && process.env.APP_URL !== 'MY_APP_URL' && (process.env.APP_URL.startsWith('http://') || process.env.APP_URL.startsWith('https://'))) {
     return `${process.env.APP_URL.replace(/\/$/, '')}/auth/callback`;
   }
 
-  // Fallback to request host
+  // Fallback to request origin header or host
+  const originHeader = req.get('origin');
+  if (originHeader && (originHeader.startsWith('http://') || originHeader.startsWith('https://'))) {
+    return `${originHeader.replace(/\/$/, '')}/auth/callback`;
+  }
+
   const host = req.get('host') || 'localhost:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   return `${protocol}://${host}/auth/callback`;
