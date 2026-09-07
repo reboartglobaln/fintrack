@@ -1,4 +1,5 @@
-import { DbCategory, DbTransaction, DbUser, loadDb, saveDb } from './dbStore';
+import { Category, Transaction, Budget } from '../models/index';
+import { Op } from 'sequelize';
 
 export interface ParsedTransaction {
   amount: number;
@@ -23,7 +24,7 @@ export interface ProcessChatResponse {
   reply: string;
   success: boolean;
   actionTaken?: 'transaction_created' | 'linked' | 'query' | 'help' | 'error';
-  transaction?: DbTransaction & { category?: DbCategory };
+  transaction?: any & { category?: any };
   budgetAlert?: {
     categoryName: string;
     spent: number;
@@ -153,7 +154,7 @@ export function extractAmount(text: string): { amount: number; matchedText: stri
 /**
  * Intelligent categorization and transaction parser
  */
-export function parseFinancialMessage(text: string, categories: DbCategory[]): ParseResult {
+export function parseFinancialMessage(text: string, categories: any[]): ParseResult {
   const trimmed = text.trim();
 
   // Check for commands
@@ -221,7 +222,7 @@ export function parseFinancialMessage(text: string, categories: DbCategory[]): P
 
   // Categorization
   const lowerDesc = cleanDesc.toLowerCase();
-  let matchedCat: DbCategory | undefined;
+  let matchedCat: any | undefined;
 
   // 1. Try keyword matching against CATEGORY_KEYWORDS
   for (const [catName, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
@@ -284,12 +285,14 @@ export async function handleIncomingChatMessage({
 }: {
   platform: 'telegram' | 'whatsapp';
   text: string;
-  user: DbUser;
+  user: any;
 }): Promise<ProcessChatResponse> {
-  const db = loadDb();
-  const userCategories = db.categories.filter((c) => c.user_id === user.id || c.user_id === null);
+  const userCategories = await Category.findAll({
+    where: { [Op.or]: [{ user_id: user.id }, { user_id: null }] },
+    raw: true
+  });
 
-  const parsed = parseFinancialMessage(text, userCategories);
+  const parsed = parseFinancialMessage(text, userCategories as any);
 
   // 1. Handle Commands
   if (parsed.isCommand && parsed.command) {
@@ -327,21 +330,10 @@ export async function handleIncomingChatMessage({
       const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
       const monthPrefix = `${currentYear}-${pad(currentMonth)}`;
 
-      const userTxs = db.transactions.filter((t) => t.user_id === user.id);
-      let totalIncome = 0;
-      let totalExpense = 0;
-      let monthIncome = 0;
-      let monthExpense = 0;
-
-      userTxs.forEach((t) => {
-        if (t.type === 'income') totalIncome += t.amount;
-        else if (t.type === 'expense') totalExpense += t.amount;
-
-        if (t.date.startsWith(monthPrefix)) {
-          if (t.type === 'income') monthIncome += t.amount;
-          else if (t.type === 'expense') monthExpense += t.amount;
-        }
-      });
+      const totalIncome = (await Transaction.sum('amount', { where: { user_id: user.id, type: 'income' } })) || 0;
+      const totalExpense = (await Transaction.sum('amount', { where: { user_id: user.id, type: 'expense' } })) || 0;
+      const monthIncome = (await Transaction.sum('amount', { where: { user_id: user.id, type: 'income', date: { [Op.startsWith]: monthPrefix } } })) || 0;
+      const monthExpense = (await Transaction.sum('amount', { where: { user_id: user.id, type: 'expense', date: { [Op.startsWith]: monthPrefix } } })) || 0;
 
       const totalBalance = totalIncome - totalExpense;
       const monthNet = monthIncome - monthExpense;
@@ -373,9 +365,9 @@ export async function handleIncomingChatMessage({
       const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
       const monthPrefix = `${currentYear}-${pad(currentMonth)}`;
 
-      const userBudgets = db.budgets.filter(
-        (b) => b.user_id === user.id && b.month === currentMonth && b.year === currentYear
-      );
+      const userBudgets = await Budget.findAll({
+        where: { user_id: user.id, month: currentMonth, year: currentYear }
+      });
 
       if (userBudgets.length === 0) {
         return {
@@ -389,44 +381,45 @@ export async function handleIncomingChatMessage({
       }
 
       let budgetLines: string[] = [];
-      userBudgets.forEach((b) => {
-        const cat = db.categories.find((c) => c.id === b.category_id);
-        const spent = db.transactions
-          .filter(
-            (t) =>
-              t.user_id === user.id &&
-              t.category_id === b.category_id &&
-              t.type === 'expense' &&
-              t.date.startsWith(monthPrefix)
-          )
-          .reduce((sum, t) => sum + t.amount, 0);
+      for (const b of userBudgets) {
+        const cat = userCategories.find((c: any) => c.id === b.category_id);
+        const spent = (await Transaction.sum('amount', {
+          where: {
+            user_id: user.id,
+            category_id: b.category_id,
+            type: 'expense',
+            date: { [Op.startsWith]: monthPrefix }
+          }
+        })) || 0;
 
-        const pct = Math.round((spent / b.amount) * 100);
+        const pct = Math.round((spent / Number(b.amount)) * 100);
         let iconStatus = '🟢';
-        if (pct >= 100) iconStatus = '🚨';
-        else if (pct >= (b.alert_threshold || 80)) iconStatus = '⚠️';
+        if (pct >= 100) iconStatus = '🔴';
+        else if (pct >= (b.alert_threshold || 80)) iconStatus = '🟡';
 
         budgetLines.push(
           `${iconStatus} *${cat?.name || 'Kategori'}*: ${pct}%\n` +
-          `   Terpakai: ${formatRupiah(spent)} / ${formatRupiah(b.amount)}`
+          `   Terpakai: ${formatRupiah(spent)} / ${formatRupiah(Number(b.amount))}`
         );
-      });
+      }
 
       const reply =
         `🎯 *Status Anggaran Bulan Ini*\n` +
         `━━━━━━━━━━━━━━━━━━━\n` +
         budgetLines.join('\n\n') +
         `\n━━━━━━━━━━━━━━━━━━━\n` +
-        `Keterangan:\n🟢 Aman (<80%) | ⚠️ Waspada (80%+) | 🚨 Melampaui (100%+)`;
+        `Keterangan:\n🟢 Aman (<80%) | 🟡 Waspada (80%+) | 🔴 Melampaui (100%+)`;
 
       return { reply, success: true, actionTaken: 'query' };
     }
 
     if (cmd === 'riwayat' || cmd === 'history') {
-      const userTxs = db.transactions
-        .filter((t) => t.user_id === user.id)
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, 5);
+      const userTxs = await Transaction.findAll({
+        where: { user_id: user.id },
+        order: [['date', 'DESC']],
+        limit: 5,
+        include: [{ model: Category, as: 'category' }]
+      });
 
       if (userTxs.length === 0) {
         return {
@@ -437,10 +430,11 @@ export async function handleIncomingChatMessage({
       }
 
       const txLines = userTxs.map((t, idx) => {
-        const cat = db.categories.find((c) => c.id === t.category_id);
+        const plain = t.get({plain:true});
+        const cat = plain.category;
         const sign = t.type === 'income' ? '+ ' : '- ';
         const emoji = t.type === 'income' ? '🟢' : '🔴';
-        return `${idx + 1}. ${emoji} *${t.description}*\n   ${sign}${formatRupiah(t.amount)} (${cat?.name || 'Kategori'}) • ${t.date}`;
+        return `${idx + 1}. ${emoji} *${t.description}*\n   ${sign}${formatRupiah(Number(t.amount))} (${cat?.name || 'Kategori'}) 📅 ${t.date}`;
       });
 
       const reply =
@@ -454,16 +448,16 @@ export async function handleIncomingChatMessage({
     }
 
     if (cmd === 'kategori') {
-      const expenseCats = userCategories.filter((c) => c.type === 'expense').map((c) => c.name);
-      const incomeCats = userCategories.filter((c) => c.type === 'income').map((c) => c.name);
+      const expenseCats = userCategories.filter((c: any) => c.type === 'expense').map((c: any) => c.name);
+      const incomeCats = userCategories.filter((c: any) => c.type === 'income').map((c: any) => c.name);
 
       const reply =
-        `📂 *Daftar Kategori FinTrack*\n` +
+        `🏷️ *Daftar Kategori FinTrack*\n` +
         `━━━━━━━━━━━━━━━━━━━\n` +
         `🔴 *Pengeluaran:*\n` +
-        expenseCats.map((c) => `• ${c}`).join('\n') +
+        expenseCats.map((c: any) => `• ${c}`).join('\n') +
         `\n\n🟢 *Pemasukan:*\n` +
-        incomeCats.map((c) => `• ${c}`).join('\n') +
+        incomeCats.map((c: any) => `• ${c}`).join('\n') +
         `\n━━━━━━━━━━━━━━━━━━━\n` +
         `Bot akan otomatis mencocokkan kata kunci Anda dengan kategori di atas!`;
 
@@ -471,11 +465,10 @@ export async function handleIncomingChatMessage({
     }
   }
 
-  // 2. Handle Errors in Transaction Parsing
   if (parsed.error || !parsed.transaction) {
     return {
       reply:
-        `❓ *Pesan Tidak Dikenali*\n` +
+        `❌ *Pesan Tidak Dikenali*\n` +
         `━━━━━━━━━━━━━━━━━━━\n` +
         `${parsed.error || 'Format pencatatan tidak dikenali.'}\n\n` +
         `💡 *Contoh yang dapat Anda coba:*\n` +
@@ -488,12 +481,9 @@ export async function handleIncomingChatMessage({
     };
   }
 
-  // 3. Create real transaction in database!
   const txData = parsed.transaction;
-  const now = new Date().toISOString();
 
-  const newTx: DbTransaction = {
-    id: db.nextIds.transactions++,
+  const newTx = await Transaction.create({
     user_id: user.id,
     category_id: txData.category_id,
     amount: txData.amount,
@@ -504,13 +494,8 @@ export async function handleIncomingChatMessage({
     recurring_interval: null,
     currency: user.base_currency || 'IDR',
     exchange_rate: 1.0,
-    created_at: now,
-    updated_at: now,
-  };
+  });
 
-  db.transactions.push(newTx);
-
-  // Check budget alert for expenses
   let budgetAlert = null;
   let budgetStatusLine = '';
 
@@ -521,62 +506,60 @@ export async function handleIncomingChatMessage({
     const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
     const monthPrefix = `${txYear}-${pad(txMonth)}`;
 
-    const budget = db.budgets.find(
-      (b) =>
-        b.user_id === user.id &&
-        b.category_id === newTx.category_id &&
-        b.month === txMonth &&
-        b.year === txYear
-    );
+    const budget = await Budget.findOne({
+      where: {
+        user_id: user.id,
+        category_id: newTx.category_id,
+        month: txMonth,
+        year: txYear
+      }
+    });
 
-    if (budget && budget.amount > 0) {
-      const totalSpent = db.transactions
-        .filter(
-          (t) =>
-            t.user_id === user.id &&
-            t.category_id === newTx.category_id &&
-            t.type === 'expense' &&
-            t.date.startsWith(monthPrefix)
-        )
-        .reduce((sum, t) => sum + t.amount, 0);
+    if (budget && Number(budget.amount) > 0) {
+      const totalSpent = (await Transaction.sum('amount', {
+        where: {
+          user_id: user.id,
+          category_id: newTx.category_id,
+          type: 'expense',
+          date: { [Op.startsWith]: monthPrefix }
+        }
+      })) || 0;
 
-      const percentage = Math.round((totalSpent / budget.amount) * 100);
+      const percentage = Math.round((totalSpent / Number(budget.amount)) * 100);
       const threshold = budget.alert_threshold || 80;
 
       if (percentage >= 100) {
         budgetAlert = {
           categoryName: txData.category_name,
           spent: totalSpent,
-          budgetAmount: budget.amount,
+          budgetAmount: Number(budget.amount),
           percentage,
           level: 'danger' as const,
-          message: `🚨 *PERINGATAN ANGGARAN (100%+)*: Pengeluaran untuk "${txData.category_name}" telah melampaui batas (${percentage}%)! Terpakai ${formatRupiah(totalSpent)} dari batas ${formatRupiah(budget.amount)}.`,
+          message: `🔴 *PERINGATAN ANGGARAN (100%+)*: Pengeluaran untuk "${txData.category_name}" telah melampaui batas (${percentage}%)! Terpakai ${formatRupiah(totalSpent)} dari batas ${formatRupiah(Number(budget.amount))}.`,
         };
-        budgetStatusLine = `\n🚨 *Status Anggaran*: *${percentage}%* (Melebihi batas ${formatRupiah(budget.amount)})`;
+        budgetStatusLine = `\n🔴 *Status Anggaran*: *${percentage}%* (Melebihi batas ${formatRupiah(Number(budget.amount))})`;
       } else if (percentage >= threshold) {
         budgetAlert = {
           categoryName: txData.category_name,
           spent: totalSpent,
-          budgetAmount: budget.amount,
+          budgetAmount: Number(budget.amount),
           percentage,
           level: 'warning' as const,
-          message: `⚠️ *PERINGATAN ANGGARAN (${threshold}%+)*: Pengeluaran untuk "${txData.category_name}" telah mencapai ${percentage}%! Terpakai ${formatRupiah(totalSpent)} dari batas ${formatRupiah(budget.amount)}.`,
+          message: `🟡 *PERINGATAN ANGGARAN (${threshold}%+)*: Pengeluaran untuk "${txData.category_name}" telah mencapai ${percentage}%! Terpakai ${formatRupiah(totalSpent)} dari batas ${formatRupiah(Number(budget.amount))}.`,
         };
-        budgetStatusLine = `\n⚠️ *Status Anggaran*: *${percentage}%* (Mendekati batas ${formatRupiah(budget.amount)})`;
+        budgetStatusLine = `\n🟡 *Status Anggaran*: *${percentage}%* (Mendekati batas ${formatRupiah(Number(budget.amount))})`;
       } else {
-        budgetStatusLine = `\n🟢 *Status Anggaran*: ${percentage}% dari ${formatRupiah(budget.amount)} (Aman)`;
+        budgetStatusLine = `\n🟢 *Status Anggaran*: ${percentage}% dari ${formatRupiah(Number(budget.amount))} (Aman)`;
       }
     }
   }
-
-  saveDb(db);
 
   const typeLabel = newTx.type === 'income' ? '🟢 *Pemasukan*' : '🔴 *Pengeluaran*';
   const reply =
     `✅ *Catatan Berhasil Disimpan!*\n` +
     `━━━━━━━━━━━━━━━━━━━\n` +
-    `${typeLabel}: *${formatRupiah(newTx.amount)}*\n` +
-    `📂 *Kategori*: ${txData.category_name}\n` +
+    `${typeLabel}: *${formatRupiah(Number(newTx.amount))}*\n` +
+    `🏷️ *Kategori*: ${txData.category_name}\n` +
     `📝 *Deskripsi*: ${newTx.description}\n` +
     `📅 *Tanggal*: ${newTx.date}` +
     `${budgetStatusLine}\n` +
@@ -584,14 +567,14 @@ export async function handleIncomingChatMessage({
     (budgetAlert ? `${budgetAlert.message}\n━━━━━━━━━━━━━━━━━━━\n` : '') +
     `💡 _Ketik */saldo* untuk melihat ringkasan keuangan Anda._`;
 
-  const categoryObj = userCategories.find((c) => c.id === newTx.category_id);
+  const categoryObj = userCategories.find((c: any) => c.id === newTx.category_id);
 
   return {
     reply,
     success: true,
     actionTaken: 'transaction_created',
     transaction: {
-      ...newTx,
+      ...newTx.get({plain:true}),
       category: categoryObj,
     },
     budgetAlert,

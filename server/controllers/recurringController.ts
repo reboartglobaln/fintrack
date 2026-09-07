@@ -1,6 +1,7 @@
 import { Response } from 'express';
+import { Op } from 'sequelize';
 import { AuthRequest } from '../middleware/auth';
-import { loadDb, saveDb, DbRecurringRule, DbTransaction } from '../services/dbStore';
+import { RecurringRule, Transaction, Category } from '../models/index';
 
 function calculateNextDate(currentDateStr: string, interval: 'daily' | 'weekly' | 'monthly' | 'yearly'): string {
   const d = new Date(currentDateStr);
@@ -14,17 +15,11 @@ function calculateNextDate(currentDateStr: string, interval: 'daily' | 'weekly' 
 export const getRecurringRules = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id!;
-    const db = loadDb();
 
-    const rules = db.recurring_rules
-      .filter((r) => r.user_id === userId)
-      .map((r) => {
-        const category = db.categories.find((c) => c.id === r.category_id);
-        return {
-          ...r,
-          category,
-        };
-      });
+    const rules = await RecurringRule.findAll({
+      where: { user_id: userId },
+      include: [{ model: Category, as: 'category' }]
+    });
 
     res.json({ success: true, data: rules });
   } catch (error) {
@@ -42,12 +37,9 @@ export const createRecurringRule = async (req: AuthRequest, res: Response): Prom
       return;
     }
 
-    const db = loadDb();
-    const now = new Date().toISOString();
     const nextDate = start_date || new Date().toISOString().split('T')[0];
 
-    const newRule: DbRecurringRule = {
-      id: db.nextIds.recurring_rules++,
+    const newRule = await RecurringRule.create({
       user_id: userId,
       category_id: Number(category_id),
       amount: Number(amount),
@@ -57,19 +49,14 @@ export const createRecurringRule = async (req: AuthRequest, res: Response): Prom
       next_run_date: nextDate,
       last_run_date: null,
       is_active: true,
-      created_at: now,
-      updated_at: now,
-    };
+    });
 
-    db.recurring_rules.push(newRule);
-    saveDb(db);
-
-    const category = db.categories.find((c) => c.id === newRule.category_id);
+    const category = await Category.findByPk(Number(category_id));
 
     res.status(201).json({
       success: true,
       message: 'Transaksi berulang berhasil ditambahkan.',
-      data: { ...newRule, category },
+      data: { ...newRule.get({ plain: true }), category },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Gagal membuat transaksi berulang.' });
@@ -80,17 +67,14 @@ export const toggleRecurringRule = async (req: AuthRequest, res: Response): Prom
   try {
     const userId = req.user?.id!;
     const ruleId = Number(req.params.id);
-    const db = loadDb();
 
-    const rule = db.recurring_rules.find((r) => r.id === ruleId && r.user_id === userId);
+    const rule = await RecurringRule.findOne({ where: { id: ruleId, user_id: userId } });
     if (!rule) {
       res.status(404).json({ success: false, message: 'Aturan transaksi berulang tidak ditemukan.' });
       return;
     }
 
-    rule.is_active = !rule.is_active;
-    rule.updated_at = new Date().toISOString();
-    saveDb(db);
+    await rule.update({ is_active: !rule.is_active });
 
     res.json({
       success: true,
@@ -106,16 +90,12 @@ export const deleteRecurringRule = async (req: AuthRequest, res: Response): Prom
   try {
     const userId = req.user?.id!;
     const ruleId = Number(req.params.id);
-    const db = loadDb();
 
-    const idx = db.recurring_rules.findIndex((r) => r.id === ruleId && r.user_id === userId);
-    if (idx === -1) {
+    const deleted = await RecurringRule.destroy({ where: { id: ruleId, user_id: userId } });
+    if (!deleted) {
       res.status(404).json({ success: false, message: 'Aturan transaksi berulang tidak ditemukan.' });
       return;
     }
-
-    db.recurring_rules.splice(idx, 1);
-    saveDb(db);
 
     res.json({ success: true, message: 'Transaksi berulang berhasil dihapus.' });
   } catch (error) {
@@ -126,20 +106,20 @@ export const deleteRecurringRule = async (req: AuthRequest, res: Response): Prom
 export const processDueRecurring = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id!;
-    const db = loadDb();
     const today = new Date().toISOString().split('T')[0];
-    const now = new Date().toISOString();
 
-    const dueRules = db.recurring_rules.filter(
-      (r) => r.user_id === userId && r.is_active && r.next_run_date <= today
-    );
+    const dueRules = await RecurringRule.findAll({
+      where: {
+        user_id: userId,
+        is_active: true,
+        next_run_date: { [Op.lte]: today }
+      }
+    });
 
     let processedCount = 0;
 
-    dueRules.forEach((rule) => {
-      // 1. Create transaction
-      const newTx: DbTransaction = {
-        id: db.nextIds.transactions++,
+    for (const rule of dueRules) {
+      await Transaction.create({
         user_id: userId,
         category_id: rule.category_id,
         amount: rule.amount,
@@ -150,21 +130,13 @@ export const processDueRecurring = async (req: AuthRequest, res: Response): Prom
         recurring_interval: rule.recurring_interval,
         currency: 'IDR',
         exchange_rate: 1.0,
-        created_at: now,
-        updated_at: now,
-      };
+      });
 
-      db.transactions.push(newTx);
-
-      // 2. Advance next_run_date
-      rule.last_run_date = today;
-      rule.next_run_date = calculateNextDate(rule.next_run_date, rule.recurring_interval);
-      rule.updated_at = now;
+      await rule.update({
+        last_run_date: today,
+        next_run_date: calculateNextDate(rule.next_run_date, rule.recurring_interval)
+      });
       processedCount++;
-    });
-
-    if (processedCount > 0) {
-      saveDb(db);
     }
 
     res.json({

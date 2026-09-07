@@ -1,14 +1,12 @@
 import { Response } from 'express';
+import { Op } from 'sequelize';
 import { AuthRequest } from '../middleware/auth';
-import { loadDb } from '../services/dbStore';
+import { Transaction, Category } from '../models/index';
 
 export const getSummary = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id!;
-    const db = loadDb();
-
-    const userTx = db.transactions.filter((t) => t.user_id === userId);
-
+    
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;
@@ -19,21 +17,27 @@ export const getSummary = async (req: AuthRequest, res: Response): Promise<void>
     const lastMonthPrefix = `${lastMonthDate.getFullYear()}-${pad(lastMonthDate.getMonth() + 1)}`;
 
     // Total balance (all time)
-    const totalIncomeAllTime = userTx.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const totalExpenseAllTime = userTx.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const totalIncomeAllTime = (await Transaction.sum('amount', { where: { user_id: userId, type: 'income' } })) || 0;
+    const totalExpenseAllTime = (await Transaction.sum('amount', { where: { user_id: userId, type: 'expense' } })) || 0;
     const totalBalance = totalIncomeAllTime - totalExpenseAllTime;
 
     // Current month calculations
-    const currentMonthTx = userTx.filter((t) => t.date.startsWith(currentMonthPrefix));
-    const currentMonthIncome = currentMonthTx.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const currentMonthExpense = currentMonthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const currentMonthIncome = (await Transaction.sum('amount', { 
+      where: { user_id: userId, type: 'income', date: { [Op.startsWith]: currentMonthPrefix } } 
+    })) || 0;
+    const currentMonthExpense = (await Transaction.sum('amount', { 
+      where: { user_id: userId, type: 'expense', date: { [Op.startsWith]: currentMonthPrefix } } 
+    })) || 0;
     const currentMonthNet = currentMonthIncome - currentMonthExpense;
     const savingsRate = currentMonthIncome > 0 ? Math.round((currentMonthNet / currentMonthIncome) * 100) : 0;
 
     // Last month calculations for growth %
-    const lastMonthTx = userTx.filter((t) => t.date.startsWith(lastMonthPrefix));
-    const lastMonthIncome = lastMonthTx.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const lastMonthExpense = lastMonthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const lastMonthIncome = (await Transaction.sum('amount', { 
+      where: { user_id: userId, type: 'income', date: { [Op.startsWith]: lastMonthPrefix } } 
+    })) || 0;
+    const lastMonthExpense = (await Transaction.sum('amount', { 
+      where: { user_id: userId, type: 'expense', date: { [Op.startsWith]: lastMonthPrefix } } 
+    })) || 0;
 
     const calcGrowth = (curr: number, prev: number) => {
       if (prev === 0) return curr > 0 ? 100 : 0;
@@ -44,34 +48,37 @@ export const getSummary = async (req: AuthRequest, res: Response): Promise<void>
     const expenseGrowth = calcGrowth(currentMonthExpense, lastMonthExpense);
 
     // Recent 5 transactions
-    const recent = [...userTx]
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      .slice(0, 5)
-      .map((tx) => {
-        const category = db.categories.find((c) => c.id === tx.category_id);
-        return { ...tx, category };
-      });
+    const recent = await Transaction.findAll({
+      where: { user_id: userId },
+      order: [['date', 'DESC']],
+      limit: 5,
+      include: [{ model: Category, as: 'category' }]
+    });
 
     // Top expense categories
-    const categoryTotals: Record<number, number> = {};
-    currentMonthTx
-      .filter((t) => t.type === 'expense')
-      .forEach((t) => {
-        categoryTotals[t.category_id] = (categoryTotals[t.category_id] || 0) + t.amount;
-      });
+    const currentMonthExpenseTx = await Transaction.findAll({
+      where: { user_id: userId, type: 'expense', date: { [Op.startsWith]: currentMonthPrefix } },
+      include: [{ model: Category, as: 'category' }]
+    });
 
-    const topCategories = Object.entries(categoryTotals)
-      .map(([catId, amount]) => {
-        const cat = db.categories.find((c) => c.id === Number(catId));
-        return {
-          id: Number(catId),
-          name: cat?.name || 'Lainnya',
-          color: cat?.color || '#0ea5e9',
-          icon: cat?.icon || 'Tag',
-          amount,
-          percentage: currentMonthExpense > 0 ? Math.round((amount / currentMonthExpense) * 100) : 0,
-        };
-      })
+    const categoryTotals: Record<number, { amount: number, category: any }> = {};
+    currentMonthExpenseTx.forEach(t => {
+      const amount = Number(t.amount);
+      if (!categoryTotals[t.category_id]) {
+        categoryTotals[t.category_id] = { amount: 0, category: t.get({plain:true}).category };
+      }
+      categoryTotals[t.category_id].amount += amount;
+    });
+
+    const topCategories = Object.values(categoryTotals)
+      .map(item => ({
+        id: item.category?.id || 0,
+        name: item.category?.name || 'Lainnya',
+        color: item.category?.color || '#0ea5e9',
+        icon: item.category?.icon || 'Tag',
+        amount: item.amount,
+        percentage: currentMonthExpense > 0 ? Math.round((item.amount / currentMonthExpense) * 100) : 0,
+      }))
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 4);
 
@@ -104,9 +111,6 @@ export const getTrend = async (req: AuthRequest, res: Response): Promise<void> =
     const { months = '6' } = req.query;
     const monthCount = Math.min(12, Math.max(3, parseInt(months as string, 10) || 6));
 
-    const db = loadDb();
-    const userTx = db.transactions.filter((t) => t.user_id === userId);
-
     const now = new Date();
     const labels: string[] = [];
     const incomeData: number[] = [];
@@ -124,9 +128,8 @@ export const getTrend = async (req: AuthRequest, res: Response): Promise<void> =
 
       labels.push(`${monthNames[d.getMonth()]} ${year}`);
 
-      const monthTx = userTx.filter((t) => t.date.startsWith(prefix));
-      const inc = monthTx.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-      const exp = monthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+      const inc = (await Transaction.sum('amount', { where: { user_id: userId, type: 'income', date: { [Op.startsWith]: prefix } } })) || 0;
+      const exp = (await Transaction.sum('amount', { where: { user_id: userId, type: 'expense', date: { [Op.startsWith]: prefix } } })) || 0;
 
       incomeData.push(inc);
       expenseData.push(exp);
@@ -152,35 +155,40 @@ export const getCategoryBreakdown = async (req: AuthRequest, res: Response): Pro
     const userId = req.user?.id!;
     const { type = 'expense', startDate, endDate } = req.query;
 
-    const db = loadDb();
-    let txs = db.transactions.filter((t) => t.user_id === userId && t.type === type);
+    const where: any = { user_id: userId, type };
 
     if (startDate && typeof startDate === 'string') {
-      txs = txs.filter((t) => t.date >= startDate);
+      where.date = { ...where.date, [Op.gte]: startDate };
     }
     if (endDate && typeof endDate === 'string') {
-      txs = txs.filter((t) => t.date <= endDate);
+      where.date = { ...where.date, [Op.lte]: endDate };
     }
 
-    const catMap: Record<number, number> = {};
+    const txs = await Transaction.findAll({ 
+      where,
+      include: [{ model: Category, as: 'category' }]
+    });
+
+    const catMap: Record<number, { amount: number, category: any }> = {};
     let total = 0;
 
     txs.forEach((t) => {
-      catMap[t.category_id] = (catMap[t.category_id] || 0) + t.amount;
-      total += t.amount;
+      const amount = Number(t.amount);
+      if (!catMap[t.category_id]) {
+        catMap[t.category_id] = { amount: 0, category: t.get({plain:true}).category };
+      }
+      catMap[t.category_id].amount += amount;
+      total += amount;
     });
 
-    const breakdown = Object.entries(catMap).map(([catId, amount]) => {
-      const cat = db.categories.find((c) => c.id === Number(catId));
-      return {
-        id: Number(catId),
-        name: cat?.name || 'Kategori Lain',
-        icon: cat?.icon || 'Tag',
-        color: cat?.color || '#94a3b8',
-        amount,
-        percentage: total > 0 ? Math.round((amount / total) * 100) : 0,
-      };
-    }).sort((a, b) => b.amount - a.amount);
+    const breakdown = Object.values(catMap).map(item => ({
+      id: item.category?.id || 0,
+      name: item.category?.name || 'Kategori Lain',
+      icon: item.category?.icon || 'Tag',
+      color: item.category?.color || '#94a3b8',
+      amount: item.amount,
+      percentage: total > 0 ? Math.round((item.amount / total) * 100) : 0,
+    })).sort((a, b) => b.amount - a.amount);
 
     res.json({
       success: true,
@@ -197,21 +205,24 @@ export const exportCSV = async (req: AuthRequest, res: Response): Promise<void> 
     const userId = req.user?.id!;
     const { startDate, endDate, type, category_id } = req.query;
 
-    const db = loadDb();
-    let txs = db.transactions.filter((t) => t.user_id === userId);
+    const where: any = { user_id: userId };
 
-    if (startDate && typeof startDate === 'string') txs = txs.filter((t) => t.date >= startDate);
-    if (endDate && typeof endDate === 'string') txs = txs.filter((t) => t.date <= endDate);
-    if (type && type !== 'all') txs = txs.filter((t) => t.type === type);
-    if (category_id && category_id !== 'all') txs = txs.filter((t) => t.category_id === Number(category_id));
+    if (startDate && typeof startDate === 'string') where.date = { ...where.date, [Op.gte]: startDate };
+    if (endDate && typeof endDate === 'string') where.date = { ...where.date, [Op.lte]: endDate };
+    if (type && type !== 'all') where.type = type;
+    if (category_id && category_id !== 'all') where.category_id = Number(category_id);
 
-    // Sort by date descending
-    txs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const txs = await Transaction.findAll({
+      where,
+      include: [{ model: Category, as: 'category' }],
+      order: [['date', 'DESC']]
+    });
 
     // Build CSV content
     const headers = ['ID', 'Tanggal', 'Deskripsi', 'Kategori', 'Tipe', 'Nominal', 'Mata Uang', 'Transaksi Berulang'];
     const rows = txs.map((t) => {
-      const cat = db.categories.find((c) => c.id === t.category_id);
+      const plain = t.get({plain:true});
+      const cat = plain.category;
       const safeDesc = `"${t.description.replace(/"/g, '""')}"`;
       const catName = `"${(cat?.name || 'Umum').replace(/"/g, '""')}"`;
       const typeLabel = t.type === 'income' ? 'Pemasukan' : 'Pengeluaran';

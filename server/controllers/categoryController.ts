@@ -1,14 +1,16 @@
 import { Response } from 'express';
+import { Op } from 'sequelize';
 import { AuthRequest } from '../middleware/auth';
-import { loadDb, saveDb } from '../services/dbStore';
+import { Category, Transaction, Budget } from '../models/index';
 
 export const getCategories = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
-    const db = loadDb();
 
-    // Return user's categories or default categories
-    const categories = db.categories.filter((c) => c.user_id === userId || c.user_id === null);
+    const categories = await Category.findAll({
+      where: { [Op.or]: [{ user_id: userId }, { user_id: null }] },
+      order: [['type', 'ASC'], ['name', 'ASC']],
+    });
 
     res.json({
       success: true,
@@ -23,11 +25,10 @@ export const getCategoryById = async (req: AuthRequest, res: Response): Promise<
   try {
     const userId = req.user?.id;
     const catId = Number(req.params.id);
-    const db = loadDb();
 
-    const category = db.categories.find(
-      (c) => c.id === catId && (c.user_id === userId || c.user_id === null)
-    );
+    const category = await Category.findOne({
+      where: { id: catId, [Op.or]: [{ user_id: userId }, { user_id: null }] },
+    });
 
     if (!category) {
       res.status(404).json({ success: false, message: 'Kategori tidak ditemukan.' });
@@ -44,12 +45,14 @@ export const createCategory = async (req: AuthRequest, res: Response): Promise<v
   try {
     const userId = req.user?.id!;
     const { name, icon, color, type } = req.body;
-    const db = loadDb();
 
-    // Check duplicate
-    const exists = db.categories.find(
-      (c) => c.user_id === userId && c.type === type && c.name.toLowerCase() === name.toLowerCase()
-    );
+    const exists = await Category.findOne({
+      where: {
+        user_id: userId,
+        type,
+        name: { [Op.iLike]: name },
+      },
+    });
 
     if (exists) {
       res.status(409).json({
@@ -59,21 +62,14 @@ export const createCategory = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    const now = new Date().toISOString();
-    const newCategory = {
-      id: db.nextIds.categories++,
+    const newCategory = await Category.create({
       user_id: userId,
       name,
       icon: icon || 'Tag',
       color: color || '#0ea5e9',
-      type: type as 'income' | 'expense',
+      type,
       is_default: false,
-      created_at: now,
-      updated_at: now,
-    };
-
-    db.categories.push(newCategory);
-    saveDb(db);
+    });
 
     res.status(201).json({
       success: true,
@@ -90,9 +86,8 @@ export const updateCategory = async (req: AuthRequest, res: Response): Promise<v
     const userId = req.user?.id!;
     const catId = Number(req.params.id);
     const { name, icon, color } = req.body;
-    const db = loadDb();
 
-    const category = db.categories.find((c) => c.id === catId && c.user_id === userId);
+    const category = await Category.findOne({ where: { id: catId, user_id: userId } });
 
     if (!category) {
       res.status(404).json({
@@ -102,12 +97,12 @@ export const updateCategory = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    if (name) category.name = name;
-    if (icon) category.icon = icon;
-    if (color) category.color = color;
-    category.updated_at = new Date().toISOString();
+    const updates: any = {};
+    if (name) updates.name = name;
+    if (icon) updates.icon = icon;
+    if (color) updates.color = color;
 
-    saveDb(db);
+    await category.update(updates);
 
     res.json({
       success: true,
@@ -123,11 +118,10 @@ export const deleteCategory = async (req: AuthRequest, res: Response): Promise<v
   try {
     const userId = req.user?.id!;
     const catId = Number(req.params.id);
-    const db = loadDb();
 
-    const catIndex = db.categories.findIndex((c) => c.id === catId && c.user_id === userId);
+    const category = await Category.findOne({ where: { id: catId, user_id: userId } });
 
-    if (catIndex === -1) {
+    if (!category) {
       res.status(404).json({
         success: false,
         message: 'Kategori tidak ditemukan atau kategori bawaan sistem tidak dapat dihapus.',
@@ -135,9 +129,8 @@ export const deleteCategory = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    // Check if category has transactions
-    const usedInTx = db.transactions.some((t) => t.category_id === catId && t.user_id === userId);
-    if (usedInTx) {
+    const usedInTx = await Transaction.count({ where: { category_id: catId, user_id: userId } });
+    if (usedInTx > 0) {
       res.status(400).json({
         success: false,
         message: 'Kategori tidak dapat dihapus karena masih digunakan pada transaksi.',
@@ -145,11 +138,8 @@ export const deleteCategory = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    db.categories.splice(catIndex, 1);
-    // Also remove any budget associated with this category
-    db.budgets = db.budgets.filter((b) => !(b.category_id === catId && b.user_id === userId));
-
-    saveDb(db);
+    await Budget.destroy({ where: { category_id: catId, user_id: userId } });
+    await category.destroy();
 
     res.json({
       success: true,

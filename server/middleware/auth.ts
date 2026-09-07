@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { loadDb } from '../services/dbStore';
+import { User } from '../models/index';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fintrack_super_secret_jwt_key_2026_change_in_production';
 
@@ -13,7 +13,7 @@ export interface AuthRequest extends Request {
   };
 }
 
-export const authenticateJWT = (req: AuthRequest, res: Response, next: NextFunction): void => {
+export const authenticateJWT = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -33,8 +33,7 @@ export const authenticateJWT = (req: AuthRequest, res: Response, next: NextFunct
       name: string;
     };
 
-    const db = loadDb();
-    const user = db.users.find((u) => u.id === decoded.id);
+    const user = await User.findByPk(decoded.id);
 
     if (!user) {
       res.status(401).json({

@@ -2,24 +2,44 @@ import { Request, Response } from 'express';
 import axios from 'axios';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { loadDb, saveDb, seedDefaultCategoriesForUser, DbUser } from '../services/dbStore';
+import { User, Category } from '../models/index';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fintrack_super_secret_jwt_key_2026_change_in_production';
 
-// Helper to determine the redirect URI safely
+const DEFAULT_CATEGORIES = [
+  { name: 'Gaji Pokok', icon: 'Briefcase', color: '#10b981', type: 'income' as const, is_default: true },
+  { name: 'Freelance & Bisnis', icon: 'Laptop', color: '#0ea5e9', type: 'income' as const, is_default: true },
+  { name: 'Investasi & Dividen', icon: 'TrendingUp', color: '#8b5cf6', type: 'income' as const, is_default: true },
+  { name: 'Hadiah & Bonus', icon: 'Gift', color: '#ec4899', type: 'income' as const, is_default: true },
+  { name: 'Makanan & Minuman', icon: 'Utensils', color: '#f97316', type: 'expense' as const, is_default: true },
+  { name: 'Transportasi', icon: 'Car', color: '#0284c7', type: 'expense' as const, is_default: true },
+  { name: 'Tempat Tinggal', icon: 'Home', color: '#6366f1', type: 'expense' as const, is_default: true },
+  { name: 'Tagihan & Utilitas', icon: 'Zap', color: '#eab308', type: 'expense' as const, is_default: true },
+  { name: 'Kesehatan & Medis', icon: 'HeartPulse', color: '#ef4444', type: 'expense' as const, is_default: true },
+  { name: 'Belanja & Hiburan', icon: 'ShoppingBag', color: '#d946ef', type: 'expense' as const, is_default: true },
+  { name: 'Pendidikan', icon: 'GraduationCap', color: '#14b8a6', type: 'expense' as const, is_default: true },
+  { name: 'Tabungan & Dana Darurat', icon: 'PiggyBank', color: '#10b981', type: 'expense' as const, is_default: true },
+];
+
+async function seedDefaultCategoriesForUser(userId: number): Promise<void> {
+  try {
+    const items = DEFAULT_CATEGORIES.map((c) => ({ ...c, user_id: userId }));
+    await Category.bulkCreate(items);
+  } catch (err) {
+    console.warn('Failed to seed default categories:', (err as Error).message);
+  }
+}
+
 export const getGoogleRedirectUri = (req: Request): string => {
-  // If query specifies origin, use that
   const originQuery = req.query.origin as string;
   if (originQuery && (originQuery.startsWith('http://') || originQuery.startsWith('https://'))) {
     return `${originQuery.replace(/\/$/, '')}/auth/callback`;
   }
 
-  // Fallback to APP_URL environment variable (ignore placeholder)
   if (process.env.APP_URL && process.env.APP_URL !== 'MY_APP_URL' && (process.env.APP_URL.startsWith('http://') || process.env.APP_URL.startsWith('https://'))) {
     return `${process.env.APP_URL.replace(/\/$/, '')}/auth/callback`;
   }
 
-  // Fallback to request origin header or host
   const originHeader = req.get('origin');
   if (originHeader && (originHeader.startsWith('http://') || originHeader.startsWith('https://'))) {
     return `${originHeader.replace(/\/$/, '')}/auth/callback`;
@@ -30,10 +50,6 @@ export const getGoogleRedirectUri = (req: Request): string => {
   return `${protocol}://${host}/auth/callback`;
 };
 
-/**
- * 1. GET /api/auth/google/url
- * Returns Google OAuth URL if configured, or configuration status & guidance.
- */
 export const getGoogleAuthUrl = async (req: Request, res: Response): Promise<void> => {
   try {
     const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -77,29 +93,23 @@ export const getGoogleAuthUrl = async (req: Request, res: Response): Promise<voi
   }
 };
 
-/**
- * Helper to find or create a user in local dbStore from Google profile
- */
 export const findOrCreateGoogleUser = async (googleProfile: {
   sub: string;
   email: string;
   name?: string;
   picture?: string;
-}): Promise<{ user: DbUser; isNew: boolean }> => {
-  const db = loadDb();
+}) => {
   const normalizedEmail = googleProfile.email.toLowerCase().trim();
 
-  let user = db.users.find((u) => u.email.toLowerCase() === normalizedEmail);
+  let user = await User.findOne({ where: { email: normalizedEmail } });
   let isNew = false;
 
   if (!user) {
     isNew = true;
     const randomPassword = await bcrypt.hash(Math.random().toString(36), 10);
-    const now = new Date().toISOString();
     const displayName = googleProfile.name || normalizedEmail.split('@')[0];
 
-    user = {
-      id: db.nextIds.users++,
+    user = await User.create({
       name: displayName,
       email: normalizedEmail,
       password: randomPassword,
@@ -107,53 +117,30 @@ export const findOrCreateGoogleUser = async (googleProfile: {
         googleProfile.picture ||
         `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(displayName)}`,
       base_currency: 'IDR',
-      google_id: googleProfile.sub,
-      auth_provider: 'google',
-      reset_token: null,
-      reset_token_expiry: null,
-      created_at: now,
-      updated_at: now,
-    };
+      // Note: If you want to store google_id and auth_provider, you will need to add those columns to the User model.
+      // Assuming they are not in the current User model based on User.ts, we will just create the user.
+    });
 
-    db.users.push(user);
-    saveDb(db);
-
-    // Seed default starter categories for new user
-    seedDefaultCategoriesForUser(user.id);
+    await seedDefaultCategoriesForUser(user.id);
   } else {
-    // Existing user: associate Google ID and update picture if provided
-    let updated = false;
-    if (!user.google_id) {
-      user.google_id = googleProfile.sub;
-      updated = true;
-    }
+    // If the columns existed, we would update them here. 
+    // For now we just update the avatar if necessary.
+    const updates: any = {};
     if (googleProfile.picture && (!user.avatar || user.avatar.includes('dicebear'))) {
-      user.avatar = googleProfile.picture;
-      updated = true;
+      updates.avatar = googleProfile.picture;
     }
-    if (user.auth_provider !== 'google') {
-      user.auth_provider = 'google';
-      updated = true;
-    }
-    if (updated) {
-      user.updated_at = new Date().toISOString();
-      saveDb(db);
+    
+    if (Object.keys(updates).length > 0) {
+      await user.update(updates);
     }
   }
 
   return { user, isNew };
 };
 
-/**
- * 2. GET /auth/callback (and /auth/callback/)
- * Google redirects here in popup window.
- * Exchanges authorization code for tokens, retrieves profile, logs user in,
- * and passes postMessage to opener window before closing.
- */
 export const handleGoogleOAuthCallback = async (req: Request, res: Response): Promise<void> => {
   const { code, error, error_description } = req.query;
 
-  // Handle errors from Google
   if (error) {
     const errorMsg = String(error_description || error || 'Autentikasi Google dibatalkan.');
     res.send(`
@@ -200,7 +187,6 @@ export const handleGoogleOAuthCallback = async (req: Request, res: Response): Pr
       throw new Error('GOOGLE_CLIENT_ID atau GOOGLE_CLIENT_SECRET belum dikonfigurasi di server.');
     }
 
-    // Exchange code for tokens
     const tokenResponse = await axios.post(
       'https://oauth2.googleapis.com/token',
       new URLSearchParams({
@@ -217,7 +203,6 @@ export const handleGoogleOAuthCallback = async (req: Request, res: Response): Pr
 
     const { access_token } = tokenResponse.data;
 
-    // Fetch user profile from Google UserInfo endpoint
     const profileResponse = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
       headers: { Authorization: `Bearer ${access_token}` },
     });
@@ -227,7 +212,6 @@ export const handleGoogleOAuthCallback = async (req: Request, res: Response): Pr
       throw new Error('Tidak dapat memperoleh alamat email dari akun Google.');
     }
 
-    // Find or create local user
     const { user, isNew } = await findOrCreateGoogleUser({
       sub: googleUser.sub || `google-${Date.now()}`,
       email: googleUser.email,
@@ -235,7 +219,6 @@ export const handleGoogleOAuthCallback = async (req: Request, res: Response): Pr
       picture: googleUser.picture,
     });
 
-    // Generate JWT token
     const token = jwt.sign(
       { id: user.id, email: user.email, name: user.name },
       JWT_SECRET,
@@ -250,7 +233,6 @@ export const handleGoogleOAuthCallback = async (req: Request, res: Response): Pr
       base_currency: user.base_currency || 'IDR',
     };
 
-    // Return HTML that posts message to opener and closes
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -310,10 +292,6 @@ export const handleGoogleOAuthCallback = async (req: Request, res: Response): Pr
   }
 };
 
-/**
- * 3. POST /api/auth/google/credential
- * Handles Google ID Token (from Google Identity Services / GSI SDK)
- */
 export const handleGoogleCredential = async (req: Request, res: Response): Promise<void> => {
   try {
     const { credential } = req.body;
@@ -322,7 +300,6 @@ export const handleGoogleCredential = async (req: Request, res: Response): Promi
       return;
     }
 
-    // Decode JWT payload safely (Google ID tokens are standard JWTs with payload as part 2)
     const parts = credential.split('.');
     if (parts.length < 2) {
       res.status(400).json({ success: false, message: 'Format token Google tidak valid.' });
@@ -372,11 +349,6 @@ export const handleGoogleCredential = async (req: Request, res: Response): Promi
   }
 };
 
-/**
- * 4. POST /api/auth/google/mock-login
- * Seamless One-Click Google Register & Login for sandbox/preview testing.
- * Uses real Google profile format so users can test immediately.
- */
 export const handleGoogleMockLogin = async (req: Request, res: Response): Promise<void> => {
   try {
     const { email = 'recobocil.art@gmail.com', name = 'Recobocil Art', picture } = req.body;

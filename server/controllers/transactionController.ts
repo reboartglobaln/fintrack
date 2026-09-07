@@ -1,6 +1,7 @@
 import { Response } from 'express';
+import { Op } from 'sequelize';
 import { AuthRequest } from '../middleware/auth';
-import { loadDb, saveDb, DbTransaction } from '../services/dbStore';
+import { Transaction, Category, Budget, RecurringRule } from '../models/index';
 import { convertCurrency } from '../services/currencyService';
 
 export const getTransactions = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -18,74 +19,45 @@ export const getTransactions = async (req: AuthRequest, res: Response): Promise<
       sortOrder = 'desc',
     } = req.query;
 
-    const db = loadDb();
+    const where: any = { user_id: userId };
 
-    // 1. Filter by user
-    let results = db.transactions.filter((t) => t.user_id === userId);
-
-    // 2. Filter by date range
     if (startDate && typeof startDate === 'string') {
-      results = results.filter((t) => t.date >= startDate);
+      where.date = { ...where.date, [Op.gte]: startDate };
     }
     if (endDate && typeof endDate === 'string') {
-      results = results.filter((t) => t.date <= endDate);
+      where.date = { ...where.date, [Op.lte]: endDate };
     }
-
-    // 3. Filter by type
     if (type && type !== 'all' && (type === 'income' || type === 'expense')) {
-      results = results.filter((t) => t.type === type);
+      where.type = type;
     }
-
-    // 4. Filter by category
     if (category_id && category_id !== 'all') {
-      const catId = Number(category_id);
-      results = results.filter((t) => t.category_id === catId);
+      where.category_id = Number(category_id);
     }
-
-    // 5. Search by description
     if (search && typeof search === 'string' && search.trim() !== '') {
-      const query = search.trim().toLowerCase();
-      results = results.filter((t) => t.description.toLowerCase().includes(query));
+      where.description = { [Op.iLike]: `%${search.trim()}%` };
     }
 
-    // 6. Sort
-    results.sort((a, b) => {
-      if (sortBy === 'amount') {
-        return sortOrder === 'asc' ? a.amount - b.amount : b.amount - a.amount;
-      }
-      // default sortBy date
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
-      return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
-    });
-
-    const total = results.length;
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const limitNum = Math.max(1, parseInt(limit as string, 10) || 10);
-    const totalPages = Math.ceil(total / limitNum);
 
-    const paginated = results.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+    const orderField = sortBy === 'amount' ? 'amount' : 'date';
+    const orderDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
 
-    // Attach category object for frontend convenience
-    const enriched = paginated.map((tx) => {
-      const category = db.categories.find((c) => c.id === tx.category_id) || {
-        id: tx.category_id,
-        name: 'Umum',
-        icon: 'Tag',
-        color: '#94a3b8',
-        type: tx.type,
-      };
-      return {
-        ...tx,
-        category,
-      };
+    const { count, rows } = await Transaction.findAndCountAll({
+      where,
+      include: [{ model: Category, as: 'category' }],
+      order: [[orderField, orderDir]],
+      offset: (pageNum - 1) * limitNum,
+      limit: limitNum,
     });
+
+    const totalPages = Math.ceil(count / limitNum);
 
     res.json({
       success: true,
-      data: enriched,
+      data: rows,
       pagination: {
-        total,
+        total: count,
         page: pageNum,
         limit: limitNum,
         totalPages,
@@ -100,23 +72,18 @@ export const getTransactionById = async (req: AuthRequest, res: Response): Promi
   try {
     const userId = req.user?.id!;
     const txId = Number(req.params.id);
-    const db = loadDb();
 
-    const tx = db.transactions.find((t) => t.id === txId && t.user_id === userId);
+    const tx = await Transaction.findOne({
+      where: { id: txId, user_id: userId },
+      include: [{ model: Category, as: 'category' }],
+    });
+
     if (!tx) {
       res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan.' });
       return;
     }
 
-    const category = db.categories.find((c) => c.id === tx.category_id);
-
-    res.json({
-      success: true,
-      data: {
-        ...tx,
-        category,
-      },
-    });
+    res.json({ success: true, data: tx });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Gagal memuat data transaksi.' });
   }
@@ -136,37 +103,26 @@ export const createTransaction = async (req: AuthRequest, res: Response): Promis
       currency = 'IDR',
     } = req.body;
 
-    const db = loadDb();
-
-    // Verify category exists
-    const category = db.categories.find((c) => c.id === Number(category_id));
+    const category = await Category.findByPk(Number(category_id));
     if (!category) {
       res.status(400).json({ success: false, message: 'Kategori yang dipilih tidak valid.' });
       return;
     }
 
-    const now = new Date().toISOString();
-    const newTx: DbTransaction = {
-      id: db.nextIds.transactions++,
+    const newTx = await Transaction.create({
       user_id: userId,
       category_id: Number(category_id),
       amount: Number(amount),
       description,
       date,
-      type: type as 'income' | 'expense',
+      type,
       is_recurring: Boolean(is_recurring),
       recurring_interval: is_recurring ? recurring_interval : null,
       currency: currency || 'IDR',
       exchange_rate: 1.0,
-      created_at: now,
-      updated_at: now,
-    };
+    });
 
-    db.transactions.push(newTx);
-
-    // If recurring was flagged, create a recurring rule automatically if not existing
     if (is_recurring && recurring_interval) {
-      // calculate next run date
       const d = new Date(date);
       if (recurring_interval === 'daily') d.setDate(d.getDate() + 1);
       else if (recurring_interval === 'weekly') d.setDate(d.getDate() + 7);
@@ -175,58 +131,50 @@ export const createTransaction = async (req: AuthRequest, res: Response): Promis
 
       const nextRun = d.toISOString().split('T')[0];
 
-      db.recurring_rules.push({
-        id: db.nextIds.recurring_rules++,
+      await RecurringRule.create({
         user_id: userId,
         category_id: Number(category_id),
         amount: Number(amount),
         description,
-        type: type as 'income' | 'expense',
+        type,
         recurring_interval,
         next_run_date: nextRun,
         last_run_date: date,
         is_active: true,
-        created_at: now,
-        updated_at: now,
       });
     }
 
-    // Check budget limit & threshold notification for expense
     let budgetAlert = null;
-    if (newTx.type === 'expense') {
-      const txDate = new Date(newTx.date);
+    if (type === 'expense') {
+      const txDate = new Date(date);
       const txMonth = txDate.getMonth() + 1;
       const txYear = txDate.getFullYear();
+      const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+      const startDate = `${txYear}-${pad(txMonth)}-01`;
+      const endDate = `${txYear}-${pad(txMonth)}-31`;
 
-      const budget = db.budgets.find(
-        (b) =>
-          b.user_id === userId &&
-          b.category_id === newTx.category_id &&
-          b.month === txMonth &&
-          b.year === txYear
-      );
+      const budget = await Budget.findOne({
+        where: { user_id: userId, category_id: Number(category_id), month: txMonth, year: txYear },
+      });
 
-      if (budget && budget.amount > 0) {
-        const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-        const monthPrefix = `${txYear}-${pad(txMonth)}`;
-        const totalSpent = db.transactions
-          .filter(
-            (t) =>
-              t.user_id === userId &&
-              t.category_id === newTx.category_id &&
-              t.type === 'expense' &&
-              t.date.startsWith(monthPrefix)
-          )
-          .reduce((sum, t) => sum + t.amount, 0);
+      if (budget && Number(budget.amount) > 0) {
+        const totalSpent = (await Transaction.sum('amount', {
+          where: {
+            user_id: userId,
+            category_id: Number(category_id),
+            type: 'expense',
+            date: { [Op.gte]: startDate, [Op.lte]: endDate },
+          },
+        })) || 0;
 
-        const percentage = Math.round((totalSpent / budget.amount) * 100);
+        const percentage = Math.round((totalSpent / Number(budget.amount)) * 100);
         const threshold = budget.alert_threshold || 80;
 
         if (percentage >= 100) {
           budgetAlert = {
             categoryName: category.name,
             spent: totalSpent,
-            budgetAmount: budget.amount,
+            budgetAmount: Number(budget.amount),
             percentage,
             level: 'danger',
             message: `⚠️ PERINGATAN ANGGARAN (100%+): Pengeluaran untuk "${category.name}" telah melampaui batas anggaran (${percentage}%)!`,
@@ -235,7 +183,7 @@ export const createTransaction = async (req: AuthRequest, res: Response): Promis
           budgetAlert = {
             categoryName: category.name,
             spent: totalSpent,
-            budgetAmount: budget.amount,
+            budgetAmount: Number(budget.amount),
             percentage,
             level: 'warning',
             message: `⚠️ PERINGATAN ANGGARAN (${threshold}%+): Pengeluaran untuk "${category.name}" telah mencapai ${percentage}% dari batas anggaran!`,
@@ -244,13 +192,11 @@ export const createTransaction = async (req: AuthRequest, res: Response): Promis
       }
     }
 
-    saveDb(db);
-
     res.status(201).json({
       success: true,
       message: 'Transaksi berhasil disimpan.',
       data: {
-        ...newTx,
+        ...newTx.get({ plain: true }),
         category,
       },
       budgetAlert,
@@ -266,62 +212,58 @@ export const updateTransaction = async (req: AuthRequest, res: Response): Promis
     const txId = Number(req.params.id);
     const { amount, description, category_id, date, type, is_recurring, recurring_interval, currency } = req.body;
 
-    const db = loadDb();
-    const tx = db.transactions.find((t) => t.id === txId && t.user_id === userId);
+    const tx = await Transaction.findOne({ where: { id: txId, user_id: userId } });
 
     if (!tx) {
       res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan.' });
       return;
     }
 
-    if (amount !== undefined) tx.amount = Number(amount);
-    if (description !== undefined) tx.description = description;
-    if (category_id !== undefined) tx.category_id = Number(category_id);
-    if (date !== undefined) tx.date = date;
-    if (type !== undefined) tx.type = type;
-    if (is_recurring !== undefined) tx.is_recurring = Boolean(is_recurring);
-    if (recurring_interval !== undefined) tx.recurring_interval = recurring_interval;
-    if (currency !== undefined) tx.currency = currency;
-    tx.updated_at = new Date().toISOString();
+    const updates: any = {};
+    if (amount !== undefined) updates.amount = Number(amount);
+    if (description !== undefined) updates.description = description;
+    if (category_id !== undefined) updates.category_id = Number(category_id);
+    if (date !== undefined) updates.date = date;
+    if (type !== undefined) updates.type = type;
+    if (is_recurring !== undefined) updates.is_recurring = Boolean(is_recurring);
+    if (recurring_interval !== undefined) updates.recurring_interval = recurring_interval;
+    if (currency !== undefined) updates.currency = currency;
 
-    const category = db.categories.find((c) => c.id === tx.category_id);
+    await tx.update(updates);
 
-    // Check budget limit & threshold notification for expense update
+    const category = await Category.findByPk(tx.category_id);
+
     let budgetAlert = null;
     if (tx.type === 'expense') {
       const txDate = new Date(tx.date);
       const txMonth = txDate.getMonth() + 1;
       const txYear = txDate.getFullYear();
+      const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+      const startDate = `${txYear}-${pad(txMonth)}-01`;
+      const endDate = `${txYear}-${pad(txMonth)}-31`;
 
-      const budget = db.budgets.find(
-        (b) =>
-          b.user_id === userId &&
-          b.category_id === tx.category_id &&
-          b.month === txMonth &&
-          b.year === txYear
-      );
+      const budget = await Budget.findOne({
+        where: { user_id: userId, category_id: tx.category_id, month: txMonth, year: txYear },
+      });
 
-      if (budget && budget.amount > 0) {
-        const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-        const monthPrefix = `${txYear}-${pad(txMonth)}`;
-        const totalSpent = db.transactions
-          .filter(
-            (t) =>
-              t.user_id === userId &&
-              t.category_id === tx.category_id &&
-              t.type === 'expense' &&
-              t.date.startsWith(monthPrefix)
-          )
-          .reduce((sum, t) => sum + t.amount, 0);
+      if (budget && Number(budget.amount) > 0) {
+        const totalSpent = (await Transaction.sum('amount', {
+          where: {
+            user_id: userId,
+            category_id: tx.category_id,
+            type: 'expense',
+            date: { [Op.gte]: startDate, [Op.lte]: endDate },
+          },
+        })) || 0;
 
-        const percentage = Math.round((totalSpent / budget.amount) * 100);
+        const percentage = Math.round((totalSpent / Number(budget.amount)) * 100);
         const threshold = budget.alert_threshold || 80;
 
         if (percentage >= 100) {
           budgetAlert = {
             categoryName: category?.name || 'Kategori',
             spent: totalSpent,
-            budgetAmount: budget.amount,
+            budgetAmount: Number(budget.amount),
             percentage,
             level: 'danger',
             message: `⚠️ PERINGATAN ANGGARAN (100%+): Pengeluaran untuk "${category?.name}" telah melampaui batas anggaran (${percentage}%)!`,
@@ -330,7 +272,7 @@ export const updateTransaction = async (req: AuthRequest, res: Response): Promis
           budgetAlert = {
             categoryName: category?.name || 'Kategori',
             spent: totalSpent,
-            budgetAmount: budget.amount,
+            budgetAmount: Number(budget.amount),
             percentage,
             level: 'warning',
             message: `⚠️ PERINGATAN ANGGARAN (${threshold}%+): Pengeluaran untuk "${category?.name}" telah mencapai ${percentage}% dari batas anggaran!`,
@@ -339,13 +281,11 @@ export const updateTransaction = async (req: AuthRequest, res: Response): Promis
       }
     }
 
-    saveDb(db);
-
     res.json({
       success: true,
       message: 'Transaksi berhasil diperbarui.',
       data: {
-        ...tx,
+        ...tx.get({ plain: true }),
         category,
       },
       budgetAlert,
@@ -359,16 +299,12 @@ export const deleteTransaction = async (req: AuthRequest, res: Response): Promis
   try {
     const userId = req.user?.id!;
     const txId = Number(req.params.id);
-    const db = loadDb();
 
-    const index = db.transactions.findIndex((t) => t.id === txId && t.user_id === userId);
-    if (index === -1) {
+    const deleted = await Transaction.destroy({ where: { id: txId, user_id: userId } });
+    if (!deleted) {
       res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan.' });
       return;
     }
-
-    db.transactions.splice(index, 1);
-    saveDb(db);
 
     res.json({
       success: true,
