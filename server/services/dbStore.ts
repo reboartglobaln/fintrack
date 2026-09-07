@@ -123,28 +123,7 @@ function ensureDirectoryExists(dir: string) {
 }
 
 function getInitialData(): FinTrackData {
-  const salt = bcrypt.genSaltSync(10);
-  const demoHashedPassword = bcrypt.hashSync('password123', salt);
   const now = new Date().toISOString();
-
-  const demoUser: DbUser = {
-    id: 1,
-    name: 'Budi Santoso',
-    email: 'demo@fintrack.id',
-    password: demoHashedPassword,
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80',
-    base_currency: 'IDR',
-    reset_token: null,
-    reset_token_expiry: null,
-    telegram_chat_id: null,
-    telegram_username: null,
-    telegram_bot_token: null,
-    telegram_pairing_code: 'FT-7291',
-    whatsapp_phone: '+6281234567890',
-    whatsapp_pairing_code: 'WA-7291',
-    created_at: now,
-    updated_at: now,
-  };
 
   let catId = 1;
   const categories: DbCategory[] = DEFAULT_CATEGORIES.map((cat) => ({
@@ -495,17 +474,17 @@ function getInitialData(): FinTrackData {
   ];
 
   return {
-    users: [demoUser],
+    users: [],
     categories,
-    transactions,
-    budgets,
-    recurring_rules,
+    transactions: [],
+    budgets: [],
+    recurring_rules: [],
     nextIds: {
-      users: 2,
+      users: 1,
       categories: catId,
-      transactions: txId,
-      budgets: bgId,
-      recurring_rules: rcId,
+      transactions: 1,
+      budgets: 1,
+      recurring_rules: 1,
     },
   };
 }
@@ -520,6 +499,15 @@ export function loadDb(): FinTrackData {
       const raw = fs.readFileSync(DATA_FILE, 'utf-8');
       memoryDb = JSON.parse(raw);
       if (memoryDb && memoryDb.users && memoryDb.transactions) {
+        // Purge any legacy demo user and associated mock records
+        const hasDemo = memoryDb.users.some((u: DbUser) => u.email === 'demo@fintrack.id');
+        if (hasDemo) {
+          memoryDb.users = memoryDb.users.filter((u: DbUser) => u.email !== 'demo@fintrack.id');
+          memoryDb.transactions = memoryDb.transactions.filter((t: DbTransaction) => t.user_id !== 1);
+          memoryDb.budgets = memoryDb.budgets.filter((b: DbBudget) => b.user_id !== 1);
+          memoryDb.recurring_rules = memoryDb.recurring_rules.filter((r: DbRecurringRule) => r.user_id !== 1);
+          saveDb(memoryDb);
+        }
         return memoryDb;
       }
     } catch (e) {

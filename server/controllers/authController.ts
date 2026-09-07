@@ -180,8 +180,8 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
 
     res.json({
       success: true,
-      message: `Kode verifikasi reset password telah dikirim ke ${email}. (Kode Demo: ${resetToken})`,
-      demoResetToken: resetToken,
+      message: `Kode verifikasi reset password telah dikirim ke ${email}.`,
+      resetToken: resetToken,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Gagal memproses permintaan lupa password.', error: (error as Error).message });

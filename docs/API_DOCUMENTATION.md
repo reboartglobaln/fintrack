@@ -165,40 +165,11 @@ Dokumentasi lengkap REST API FinTrack, mencakup autentikasi Google OAuth 2.0, ma
 ### 2.3 Verifikasi Google Credential (Google Identity Services / One Tap)
 - **Method**: `POST`
 - **Endpoint**: `/api/auth/google/credential`
-- **Deskripsi**: Menerima token ID Google JWT dari SDK Google Identity Services di frontend, mendekode payload profil secara aman, dan mengautentikasi pengguna.
+- **Deskripsi**: Menerima token ID Google JWT dari SDK Google Identity Services di frontend, mendekode payload profil secara aman, dan mengautentikasi pengguna secara nyata ke database.
 - **Request Body**:
 ```json
 {
   "credential": "<GOOGLE_ID_TOKEN>"
-}
-```
-
-### 2.4 Google Sandbox / Instant Simulation Login
-- **Method**: `POST`
-- **Endpoint**: `/api/auth/google/mock-login`
-- **Deskripsi**: Memungkinkan pengujian pendaftaran dan login Google 1-klik secara instan di sandbox preview tanpa perlu mengatur Google Cloud Console terlebih dahulu.
-- **Request Body**:
-```json
-{
-  "email": "recobocil.art@gmail.com",
-  "name": "Recobocil Art",
-  "picture": "https://lh3.googleusercontent.com/a/default-user"
-}
-```
-- **Response 200 OK**:
-```json
-{
-  "success": true,
-  "message": "Berhasil masuk dengan akun Google!",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "isNew": false,
-  "user": {
-    "id": 1,
-    "name": "Recobocil Art",
-    "email": "recobocil.art@gmail.com",
-    "avatar": "https://lh3.googleusercontent.com/a/default-user",
-    "base_currency": "IDR"
-  }
 }
 ```
 
@@ -409,3 +380,84 @@ Header wajib: `Authorization: Bearer <token>`
 - **Method**: `GET`
 - **Endpoint**: `/api/system/currencies/convert?amount=100000&from=IDR&to=USD`
 - **Public**: Ya
+
+### 8.5 Status Koneksi Database & Supabase
+- **Method**: `GET`
+- **Endpoint**: `/api/system/database-status`
+- **Public**: Ya
+- **Deskripsi**: Memeriksa status real-time koneksi ke Supabase PostgreSQL, pool Sequelize dengan enkripsi SSL, dan memastikan mode demo nonaktif.
+- **Response 200 OK**:
+```json
+{
+  "success": true,
+  "mode": "supabase",
+  "supabase": {
+    "configured": true,
+    "connected": true,
+    "message": "Successfully connected to Supabase PostgreSQL database!"
+  },
+  "postgresql": {
+    "connected": true
+  },
+  "demo_mode": false,
+  "timestamp": "2026-09-07T05:30:00.000Z"
+}
+```
+
+---
+
+## 🗄️ 9. Integrasi Supabase & Database Cloud
+
+FinTrack menggunakan arsitektur **PostgreSQL Cloud** yang di-host pada Supabase. Sistem mendukung koneksi langsung melalui REST SDK `@supabase/supabase-js` serta ORM/connection pooling via Sequelize.
+
+### 9.1 Variabel Lingkungan yang Dibutuhkan (`.env`)
+```env
+# Supabase API Credentials
+SUPABASE_URL=https://[YOUR-PROJECT-REF].supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+# PostgreSQL Direct Connection String
+DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+```
+
+### 9.2 Zero-Demo Mode (Keamanan Lingkungan Produksi)
+- Seluruh akun dummy (`demo@fintrack.id`), password statis bawaan, dan seed data palsu telah dieliminasi secara menyeluruh.
+- Setiap pengguna baru harus mendaftar secara autentik melalui form registrasi atau Google OAuth 2.0.
+- Seluruh tabel relasional (`users`, `categories`, `transactions`, `budgets`, `recurring_rules`) beroperasi pada data riil pengguna yang terisolasi berdasarkan kolom `user_id`.
+
+---
+
+## 📝 10. Catatan Perubahan Rilis (Changelog)
+
+Catatan riwayat progres dan pembaruan arsitektur sistem FinTrack:
+
+### 🚀 Versi 2.2.0 (7 September 2026) - *Migrasi Supabase & Eliminasi Total Mode Demo*
+- **Database & Supabase Integration**:
+  - Inisialisasi client service `@supabase/supabase-js` di `server/services/supabase.ts` dengan deteksi otomatis ketersediaan `SUPABASE_URL` dan `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY`.
+  - Penambahan dukungan `DATABASE_URL` pada `server/config/database.ts` dengan deteksi otomatis SSL (`rejectUnauthorized: false`) untuk host cloud PostgreSQL Supabase.
+  - Endpoint baru `GET /api/system/database-status` untuk diagnosis kesehatan database dan status mode sistem secara langsung.
+  - Pembuatan skrip DDL SQL komprehensif (`database/schema.sql`) untuk dieksekusi di Supabase SQL Editor.
+- **Eliminasi Total Mode Demo**:
+  - Menghapus endpoint sandbox mock Google login (`/api/auth/google/mock-login`).
+  - Menghapus akun demo dummy (`demo@fintrack.id`), password bawaan, dan bypass login.
+  - Menghapus file penyimpanan dummy legacy `/data/fintrack_data.json`.
+  - Mengganti token reset password dummy menjadi generator kriptografis 64-karakter dengan waktu kedaluwarsa 1 jam.
+  - Menghilangkan tombol / opsi "Login Mode Demo" dari form login frontend.
+- **Dokumentasi & UI**:
+  - Penambahan Tab **"Supabase & Database"** pada halaman dokumentasi `/docs` dengan tool *Live Connection Tester*, tombol salin skrip SQL instan, dan panduan environment.
+  - Penambahan topik arsitektur ke-9: *Migrasi Supabase PostgreSQL & Eliminasi Total Mode Demo*.
+  - Pembaruan spesifikasi markdown ke standar **v2.2 Supabase & Zero-Demo**.
+  - Penambahan riwayat perubahan rilis (Changelog) lengkap pada dokumentasi.
+
+### 🌟 Versi 2.1.0 (6 September 2026) - *Google OAuth 2.0 & Cross-Origin Handshake*
+- Implementasi otentikasi Google Sign-In berbasis popup window independen dengan event handshake aman `window.opener.postMessage`.
+- Dukungan endpoint `/api/auth/google/url`, `/auth/callback`, dan `/api/auth/google/credential` (Google One Tap).
+- Integrasi webhook bot WhatsApp Cloud API dan Telegram Bot API untuk pencatatan transaksi otomatis via pesan chat natural language.
+
+### 📦 Versi 2.0.0 (5 September 2026) - *Multi-Currency & Advanced Analytics*
+- Dukungan konversi kurs mata uang multi-nasional (IDR, USD, EUR, SGD, JPY).
+- Fitur monitoring anggaran bulanan (budgets) dengan indikator alert threshold.
+- Fitur transaksi berulang otomatis (recurring transactions).
+- Desain antarmuka modern dengan dukungan Dark Mode dan responsif di seluruh ukuran perangkat.
+

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Wallet, Lock, Mail, ArrowRight, Sparkles } from 'lucide-react';
+import { Wallet, Lock, Mail, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Button } from '../components/common/Button';
@@ -21,12 +21,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const fillDemoAccount = () => {
-    setEmail('demo@fintrack.id');
-    setPassword('password123');
-    setErrors({});
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,26 +59,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
             Kelola pengeluaran, anggaran, dan wujudkan kebebasan finansial Anda.
           </p>
-        </div>
-
-        {/* Demo Fast Login Banner */}
-        <div className="mb-4 p-3.5 rounded-xl bg-sky-50 dark:bg-sky-950/60 border border-sky-200/80 dark:border-sky-800/80 flex items-center justify-between">
-          <div className="text-xs">
-            <p className="font-bold text-sky-900 dark:text-sky-200 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-sky-500" />
-              <span>Coba Demo Langsung</span>
-            </p>
-            <p className="text-[11px] text-sky-700/80 dark:text-sky-300/80 mt-0.5">
-              demo@fintrack.id / password123
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={fillDemoAccount}
-            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-500 hover:bg-sky-600 text-white transition-colors shadow-sm"
-          >
-            Gunakan Akun Demo
-          </button>
         </div>
 
         {/* Login Form */}

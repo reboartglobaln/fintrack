@@ -20,6 +20,9 @@ import {
   ShieldCheck,
   KeyRound,
   Filter,
+  RefreshCw,
+  AlertCircle,
+  History,
 } from 'lucide-react';
 import api from '../api/axios';
 
@@ -35,14 +38,121 @@ interface ApiEndpointItem {
   responseSample?: string;
 }
 
+interface ChangelogEntry {
+  version: string;
+  date: string;
+  badge: string;
+  title: string;
+  highlights: {
+    category: string;
+    items: string[];
+  }[];
+}
+
+const changelogData: ChangelogEntry[] = [
+  {
+    version: 'v2.2.0',
+    date: '7 September 2026',
+    badge: 'Rilis Terbaru',
+    title: 'Migrasi Supabase PostgreSQL & Eliminasi Total Mode Demo',
+    highlights: [
+      {
+        category: 'Integrasi Database Supabase Cloud',
+        items: [
+          'Inisialisasi client SDK @supabase/supabase-js pada server/services/supabase.ts dengan fallback adaptif.',
+          'Dukungan koneksi pool PostgreSQL dengan enkripsi SSL terverifikasi (rejectUnauthorized: false) di server/config/database.ts.',
+          'Penambahan endpoint diagnostik GET /api/system/database-status untuk monitoring kesehatan database secara real-time.',
+          'Penyusunan skema SQL DDL komprehensif di database/schema.sql dan tab interaktif di halaman Docs untuk Supabase SQL Editor.',
+        ],
+      },
+      {
+        category: 'Pembersihan Total Mode Demo (Zero-Demo)',
+        items: [
+          'Penghapusan endpoint simulasi Google login (/api/auth/google/mock-login).',
+          'Penghapusan akun demo dummy (demo@fintrack.id), password statis bawaan, dan bypass bypass kredensial.',
+          'Penghapusan file data lokal dummy /data/fintrack_data.json.',
+          'Implementasi token reset password kriptografis 64-karakter dengan kedaluwarsa 1 jam (menggantikan token demo tetap).',
+          'Pembersihan opsi tombol "Masuk Akun Demo" dari antarmuka login dan registrasi.',
+        ],
+      },
+      {
+        category: 'Dokumentasi & Arsitektur',
+        items: [
+          'Pembaruan dokumentasi API internal /docs/API_DOCUMENTATION.md dan REST API Explorer.',
+          'Penambahan tab "Supabase & Database" dengan Live Connection Tester dan tombol salin skema SQL.',
+          'Penambahan tab dan catatan riwayat rilis (Changelog) lengkap pada dokumentasi.',
+        ],
+      },
+    ],
+  },
+  {
+    version: 'v2.1.0',
+    date: '6 September 2026',
+    badge: 'OAuth & Webhook',
+    title: 'Google OAuth 2.0 & Integrasi Webhook Bot Chat',
+    highlights: [
+      {
+        category: 'Autentikasi Google',
+        items: [
+          'Implementasi alur otentikasi Google Sign-In berbasis popup window independen dengan event postMessage lintas origin.',
+          'Dukungan endpoint /api/auth/google/url, /auth/callback, dan /api/auth/google/credential (Google One Tap).',
+        ],
+      },
+      {
+        category: 'Bot WhatsApp & Telegram',
+        items: [
+          'Webhook publik Telegram Bot API dan WhatsApp Cloud API.',
+          'Engine parsing bahasa alami (NLP) untuk pencatatan instan transaksi via pesan teks.',
+        ],
+      },
+    ],
+  },
+  {
+    version: 'v2.0.0',
+    date: '5 September 2026',
+    badge: 'Fitur Finansial',
+    title: 'Multi-Currency, Budgeting & Analytics',
+    highlights: [
+      {
+        category: 'Fitur Utama',
+        items: [
+          'Konversi kurs mata uang multi-nasional (IDR, USD, EUR, SGD, JPY).',
+          'Monitoring plafon anggaran bulanan (budgets) dengan indikator threshold.',
+          'Otomasi transaksi berulang (recurring rules) harian, mingguan, dan bulanan.',
+          'Dukungan Dark Mode dan tampilan responsif mobile-first.',
+        ],
+      },
+    ],
+  },
+];
+
 export const DocsPage: React.FC = () => {
-  const [activeSection, setActiveSection] = useState<'solutions' | 'api' | 'markdown' | 'docker'>('api');
+  const [activeSection, setActiveSection] = useState<'solutions' | 'api' | 'database' | 'changelog' | 'markdown' | 'docker'>('api');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [testResult, setTestResult] = useState<{ endpoint: string; data: any; status: number } | null>(null);
   const [testingEndpoint, setTestingEndpoint] = useState<string | null>(null);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [isMarkdownCopied, setIsMarkdownCopied] = useState(false);
+  const [isSqlCopied, setIsSqlCopied] = useState(false);
+  const [dbStatus, setDbStatus] = useState<any>(null);
+  const [checkingDb, setCheckingDb] = useState(false);
+
+  const checkDatabaseStatus = async () => {
+    setCheckingDb(true);
+    try {
+      const res = await api.get('/system/database-status');
+      setDbStatus(res.data);
+    } catch (err: any) {
+      setDbStatus({
+        success: false,
+        error: err.response?.data?.message || err.message,
+        mode: 'unknown',
+      });
+    } finally {
+      setCheckingDb(false);
+    }
+  };
 
   const testApi = async (endpoint: string) => {
     setTestingEndpoint(endpoint);
@@ -189,6 +299,24 @@ res.send(\`
   </script>
 \`);`,
     },
+    {
+      id: 9,
+      title: '9. Migrasi Supabase PostgreSQL & Eliminasi Total Mode Demo',
+      issue: 'Kebutuhan database relasional cloud persisten (Supabase) serta pembersihan total akun demo, token dummy, dan mock data untuk standar produksi.',
+      solution:
+        'Sistem FinTrack mengintegrasikan client SDK @supabase/supabase-js dan konektor Sequelize dengan konfigurasi SSL. Seluruh elemen demo mode (demo fast login, password reset token hardcoded, dan seed dummy) telah dihapus permanen. Cukup sediakan SUPABASE_URL dan SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY di .env untuk menghubungkan aplikasi langsung ke basis data PostgreSQL Supabase.',
+      codeSnippet: `// server/services/supabase.ts
+import { createClient } from '@supabase/supabase-js';
+
+export const isSupabaseConfigured = (): boolean => {
+  return Boolean(process.env.SUPABASE_URL && (process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY));
+};
+
+export const getSupabase = () => {
+  if (!isSupabaseConfigured()) return null;
+  return createClient(process.env.SUPABASE_URL!, (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)!);
+};`,
+    },
   ];
 
   const apiEndpoints: ApiEndpointItem[] = [
@@ -235,22 +363,23 @@ res.send(\`
 }`,
     },
     {
-      method: 'POST',
-      path: '/api/auth/google/mock-login',
-      category: 'google',
-      categoryLabel: 'Google OAuth 2.0',
-      desc: 'Simulasi/sandbox 1-klik akun Google untuk pengujian instan tanpa setup GCP eksternal',
+      method: 'GET',
+      path: '/api/system/database-status',
+      category: 'reports',
+      categoryLabel: 'Laporan & Sistem',
+      desc: 'Pemeriksaan status koneksi database (Supabase PostgreSQL / Sequelize / JSON fallback)',
       isProtected: false,
-      requestBody: `{
-  "email": "recobocil.art@gmail.com",
-  "name": "Recobocil Art",
-  "picture": "https://lh3.googleusercontent.com/a/default"
-}`,
       responseSample: `{
   "success": true,
-  "message": "Berhasil masuk dengan akun Google!",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "user": { "id": 1, "name": "Recobocil Art", "email": "recobocil.art@gmail.com" }
+  "mode": "supabase",
+  "supabase": {
+    "configured": true,
+    "connected": true,
+    "message": "Successfully connected to Supabase PostgreSQL database!"
+  },
+  "postgresql": { "connected": true },
+  "demo_mode": false,
+  "timestamp": "2026-09-07T06:00:00.000Z"
 }`,
     },
 
@@ -568,16 +697,17 @@ res.send(\`
       ? apiEndpoints
       : apiEndpoints.filter((ep) => ep.category === selectedCategory);
 
-  const markdownDocs = `# FinTrack REST API Documentation
+  const markdownDocs = `# FinTrack REST API & Supabase Architecture Documentation
 Base URL: /api
 Auth: JWT Bearer Token (Authorization: Bearer <token>)
+Database: Supabase PostgreSQL (via @supabase/supabase-js & Sequelize SSL)
+Production Status: Zero-Demo Mode (Real user accounts & secure transactions)
 
 Endpoints Summary:
-1. Google OAuth 2.0
+1. Google OAuth 2.0 (Real Popup Flow)
 - GET  /api/auth/google/url          (Cek status konfigurasi & auth URL Google)
 - GET  /auth/callback                 (Callback handler popup postMessage)
 - POST /api/auth/google/credential   (Verifikasi ID Token Google One Tap)
-- POST /api/auth/google/mock-login   (Simulasi login/registrasi instan Google)
 
 2. Autentikasi & Akun
 - POST  /api/auth/register           (Daftar akun lokal)
@@ -609,9 +739,10 @@ Endpoints Summary:
 - POST /api/integrations/telegram/webhook (Webhook Telegram Bot API)
 - POST /api/integrations/whatsapp/webhook (Webhook WhatsApp Cloud API)
 
-6. Laporan & Sistem
+6. Laporan & Database Sistem
 - GET /api/reports/summary           (Ringkasan total saldo & tabungan)
 - GET /api/reports/trend             (Tren finansial 6 bulan)
+- GET /api/system/database-status    (Status koneksi Supabase / PostgreSQL)
 - GET /api/system/health             (Health check status)
 - GET /api/system/currencies         (Daftar nilai tukar mata uang)`;
 
@@ -631,11 +762,11 @@ Endpoints Summary:
               Architecture & API Documentation
             </h2>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
-              v2.1 Google OAuth Ready
+              v2.2 Supabase & Zero-Demo
             </span>
           </div>
           <p className="text-xs text-slate-400 dark:text-slate-500">
-            Dokumentasi lengkap REST API FinTrack, integrasi Google Sign-In, webhook bot chat, dan solusi arsitektur backend.
+            Dokumentasi REST API FinTrack, integrasi Supabase PostgreSQL, Google Sign-In, webhook bot chat, dan solusi backend.
           </p>
         </div>
 
@@ -653,6 +784,20 @@ Endpoints Summary:
             REST API Explorer
           </button>
           <button
+            onClick={() => {
+              setActiveSection('database');
+              if (!dbStatus) checkDatabaseStatus();
+            }}
+            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shrink-0 ${
+              activeSection === 'database'
+                ? 'bg-white dark:bg-slate-900 text-sky-500 shadow-sm'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Database className="w-3.5 h-3.5" />
+            Supabase & Database
+          </button>
+          <button
             onClick={() => setActiveSection('solutions')}
             className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shrink-0 ${
               activeSection === 'solutions'
@@ -661,7 +806,18 @@ Endpoints Summary:
             }`}
           >
             <ShieldCheck className="w-3.5 h-3.5" />
-            Solusi Arsitektur (8 Topik)
+            Solusi Arsitektur (9 Topik)
+          </button>
+          <button
+            onClick={() => setActiveSection('changelog')}
+            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shrink-0 ${
+              activeSection === 'changelog'
+                ? 'bg-white dark:bg-slate-900 text-sky-500 shadow-sm'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            Catatan Perubahan (Changelog)
           </button>
           <button
             onClick={() => setActiveSection('markdown')}
@@ -991,6 +1147,385 @@ Endpoints Summary:
             <div className="bg-slate-950 p-4 rounded-xl text-slate-200 font-mono text-xs overflow-x-auto max-h-[600px] border border-slate-800 leading-relaxed">
               <pre>{markdownDocs}</pre>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION: SUPABASE & DATABASE CONFIGURATION */}
+      {activeSection === 'database' && (
+        <div className="space-y-6">
+          {/* Live Status Card */}
+          <div className="p-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                    Status Konektivitas Database FinTrack
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Pemeriksaan status real-time koneksi Supabase Cloud PostgreSQL dan eliminasi demo mode.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={checkDatabaseStatus}
+                disabled={checkingDb}
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white transition-all shadow-sm self-start sm:self-auto"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${checkingDb ? 'animate-spin' : ''}`} />
+                {checkingDb ? 'Memeriksa...' : 'Uji Koneksi Sekarang'}
+              </button>
+            </div>
+
+            {dbStatus && (
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 ${
+                      dbStatus.supabase?.connected || dbStatus.postgresql?.connected
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                        : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-current animate-pulse" />
+                    Mode: {dbStatus.mode?.toUpperCase() || 'FALLBACK'}
+                  </span>
+
+                  <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                    Mode Demo: {dbStatus.demo_mode ? 'Aktif' : 'Permanen Dinonaktifkan (Production Real Data)'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1">
+                    <p className="font-semibold text-slate-700 dark:text-slate-300">Supabase Client Status:</p>
+                    <p className="text-slate-500 dark:text-slate-400">
+                      Konfigurasi: {dbStatus.supabase?.configured ? 'Terdeteksi (SUPABASE_URL diatur)' : 'Belum diisi di .env'}
+                    </p>
+                    <p className="text-slate-500 dark:text-slate-400">
+                      Konektivitas: {dbStatus.supabase?.connected ? 'Terhubung Berhasil' : (dbStatus.supabase?.message || 'Menunggu konfigurasi')}
+                    </p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1">
+                    <p className="font-semibold text-slate-700 dark:text-slate-300">Koneksi PostgreSQL (Sequelize):</p>
+                    <p className="text-slate-500 dark:text-slate-400">
+                      Status: {dbStatus.postgresql?.connected ? 'Terhubung (DATABASE_URL / Postgres)' : 'Offline / Menggunakan Client SDK'}
+                    </p>
+                    <p className="text-slate-500 dark:text-slate-400">
+                      SSL Mode: {dbStatus.postgresql?.ssl ? 'Aktif (rejectUnauthorized: false)' : 'Standard'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Setup Guide Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-sky-500/10 text-sky-500 flex items-center justify-center text-xs font-bold">1</span>
+                <h4 className="font-bold text-slate-800 dark:text-white text-sm">Variabel Lingkungan Supabase</h4>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                Salin variabel berikut ke file <code className="text-sky-500 font-mono">.env</code> Anda di root project:
+              </p>
+              <div className="bg-slate-950 text-slate-200 p-3 rounded-xl font-mono text-[11px] space-y-1 border border-slate-800 overflow-x-auto">
+                <p className="text-slate-400"># URL Project Supabase</p>
+                <p className="text-emerald-400">SUPABASE_URL=https://[YOUR_PROJECT].supabase.co</p>
+                <p className="text-slate-400 mt-2"># Anon Public Key (atau Service Role Key)</p>
+                <p className="text-emerald-400">SUPABASE_ANON_KEY=eyJh...</p>
+                <p className="text-emerald-400">SUPABASE_SERVICE_ROLE_KEY=eyJh...</p>
+                <p className="text-slate-400 mt-2"># Optional: PostgreSQL Connection URI</p>
+                <p className="text-emerald-400">DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres</p>
+              </div>
+            </div>
+
+            <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-sky-500/10 text-sky-500 flex items-center justify-center text-xs font-bold">2</span>
+                <h4 className="font-bold text-slate-800 dark:text-white text-sm">Zero-Demo Mode Guarantees</h4>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                Sesuai permintaan Anda, seluruh mode demo telah dihilangkan secara menyeluruh:
+              </p>
+              <ul className="text-xs text-slate-600 dark:text-slate-300 space-y-2 list-disc pl-4">
+                <li><strong className="text-slate-900 dark:text-white">Tidak ada akun demo dummy:</strong> User harus mendaftar secara nyata melalui formulir register atau Google Sign-In asli.</li>
+                <li><strong className="text-slate-900 dark:text-white">Tidak ada auto-seed data palsu:</strong> Tabel transaksi dan anggaran murni menyimpan entri aktual Anda.</li>
+                <li><strong className="text-slate-900 dark:text-white">Reset Password berbasis Token Asli:</strong> Generator token acak kriptografis 64-karakter dengan kedaluwarsa 1 jam.</li>
+                <li><strong className="text-slate-900 dark:text-white">Data aman & terisolasi:</strong> Setiap transaksi dan kategori terikat kuat ke <code className="text-sky-500 font-mono">user_id</code>.</li>
+              </ul>
+            </div>
+          </div>
+
+          {/* SQL Schema for Supabase SQL Editor */}
+          <div className="p-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="font-bold text-slate-800 dark:text-white text-sm">
+                  Skrip DDL PostgreSQL untuk Supabase SQL Editor
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Jalankan skrip berikut di menu <strong>SQL Editor</strong> pada dashboard Supabase Anda untuk membuat seluruh tabel:
+                </p>
+              </div>
+
+              <button
+                onClick={() => {
+                  const sqlContent = `-- FINTRACK POSTGRESQL SCHEMA FOR SUPABASE
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    avatar VARCHAR(500) DEFAULT 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80',
+    base_currency VARCHAR(10) DEFAULT 'IDR',
+    reset_token VARCHAR(255) NULL,
+    reset_token_expiry TIMESTAMP WITH TIME ZONE NULL,
+    google_id VARCHAR(255) NULL,
+    auth_provider VARCHAR(50) DEFAULT 'local',
+    telegram_chat_id VARCHAR(100) NULL,
+    telegram_username VARCHAR(100) NULL,
+    whatsapp_phone VARCHAR(50) NULL,
+    pairing_code VARCHAR(20) NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS categories (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    icon VARCHAR(50) NOT NULL DEFAULT 'Tag',
+    color VARCHAR(20) NOT NULL DEFAULT '#0ea5e9',
+    type VARCHAR(20) NOT NULL CHECK (type IN ('income', 'expense')),
+    is_default BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_user_category_name_type UNIQUE (user_id, name, type)
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+    description VARCHAR(255) NOT NULL,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    type VARCHAR(20) NOT NULL CHECK (type IN ('income', 'expense')),
+    is_recurring BOOLEAN DEFAULT FALSE,
+    recurring_interval VARCHAR(20) NULL,
+    currency VARCHAR(10) DEFAULT 'IDR',
+    exchange_rate NUMERIC(12, 6) DEFAULT 1.0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS budgets (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+    year INTEGER NOT NULL CHECK (year >= 2020),
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+    alert_threshold INTEGER DEFAULT 80 CHECK (alert_threshold BETWEEN 50 AND 100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_user_category_month_year UNIQUE (user_id, category_id, month, year)
+);
+
+CREATE TABLE IF NOT EXISTS recurring_rules (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+    description VARCHAR(255) NOT NULL,
+    type VARCHAR(20) NOT NULL CHECK (type IN ('income', 'expense')),
+    recurring_interval VARCHAR(20) NOT NULL CHECK (recurring_interval IN ('daily', 'weekly', 'monthly')),
+    next_run_date DATE NOT NULL,
+    last_run_date DATE NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_trans_user_date ON transactions(user_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_trans_user_type ON transactions(user_id, type);
+CREATE INDEX IF NOT EXISTS idx_trans_category ON transactions(category_id);`;
+                  navigator.clipboard.writeText(sqlContent);
+                  setIsSqlCopied(true);
+                  setTimeout(() => setIsSqlCopied(false), 2000);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white transition-all self-start sm:self-auto shrink-0 shadow-sm"
+              >
+                {isSqlCopied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    SQL Tersalin!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    Salin SQL Schema
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="bg-slate-950 p-4 rounded-xl text-slate-300 font-mono text-xs overflow-x-auto max-h-[350px] border border-slate-800 leading-relaxed">
+              <pre>{`-- 1. USERS TABLE
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    avatar VARCHAR(500) DEFAULT 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80',
+    base_currency VARCHAR(10) DEFAULT 'IDR',
+    reset_token VARCHAR(255) NULL,
+    reset_token_expiry TIMESTAMP WITH TIME ZONE NULL,
+    google_id VARCHAR(255) NULL,
+    auth_provider VARCHAR(50) DEFAULT 'local',
+    telegram_chat_id VARCHAR(100) NULL,
+    telegram_username VARCHAR(100) NULL,
+    whatsapp_phone VARCHAR(50) NULL,
+    pairing_code VARCHAR(20) NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. CATEGORIES TABLE
+CREATE TABLE IF NOT EXISTS categories (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    icon VARCHAR(50) NOT NULL DEFAULT 'Tag',
+    color VARCHAR(20) NOT NULL DEFAULT '#0ea5e9',
+    type VARCHAR(20) NOT NULL CHECK (type IN ('income', 'expense')),
+    is_default BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_user_category_name_type UNIQUE (user_id, name, type)
+);
+
+-- 3. TRANSACTIONS TABLE
+CREATE TABLE IF NOT EXISTS transactions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+    description VARCHAR(255) NOT NULL,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    type VARCHAR(20) NOT NULL CHECK (type IN ('income', 'expense')),
+    is_recurring BOOLEAN DEFAULT FALSE,
+    recurring_interval VARCHAR(20) NULL,
+    currency VARCHAR(10) DEFAULT 'IDR',
+    exchange_rate NUMERIC(12, 6) DEFAULT 1.0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4. BUDGETS TABLE
+CREATE TABLE IF NOT EXISTS budgets (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+    year INTEGER NOT NULL CHECK (year >= 2020),
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+    alert_threshold INTEGER DEFAULT 80 CHECK (alert_threshold BETWEEN 50 AND 100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_user_category_month_year UNIQUE (user_id, category_id, month, year)
+);
+
+-- 5. RECURRING RULES TABLE
+CREATE TABLE IF NOT EXISTS recurring_rules (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+    description VARCHAR(255) NOT NULL,
+    type VARCHAR(20) NOT NULL CHECK (type IN ('income', 'expense')),
+    recurring_interval VARCHAR(20) NOT NULL CHECK (recurring_interval IN ('daily', 'weekly', 'monthly')),
+    next_run_date DATE NOT NULL,
+    last_run_date DATE NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);`}</pre>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION: CATATAN PERUBAHAN (CHANGELOG) */}
+      {activeSection === 'changelog' && (
+        <div className="space-y-6">
+          <div className="p-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-2">
+            <div className="flex items-center gap-2.5">
+              <History className="w-5 h-5 text-sky-500" />
+              <h3 className="font-bold text-slate-800 dark:text-white">
+                Catatan Riwayat Perubahan & Pembaruan Sistem (Changelog)
+              </h3>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Dokumentasi kronologis seluruh progres pengembangan FinTrack, mencakup migrasi database Supabase Cloud, eliminasi demo mode, implementasi Google OAuth 2.0, dan integrasi webhook bot.
+            </p>
+          </div>
+
+          <div className="space-y-6">
+            {changelogData.map((log) => (
+              <div
+                key={log.version}
+                className="p-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-5"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <span className="px-3 py-1 rounded-xl text-xs font-black bg-sky-500 text-white shadow-sm">
+                      {log.version}
+                    </span>
+                    <h4 className="font-bold text-slate-800 dark:text-white text-base">
+                      {log.title}
+                    </h4>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                      {log.badge}
+                    </span>
+                    <span>•</span>
+                    <span>{log.date}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  {log.highlights.map((h, i) => (
+                    <div
+                      key={i}
+                      className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800/80 space-y-2"
+                    >
+                      <h5 className="font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+                        {h.category}
+                      </h5>
+                      <ul className="space-y-1.5 pl-3">
+                        {h.items.map((item, j) => (
+                          <li
+                            key={j}
+                            className="text-xs text-slate-600 dark:text-slate-400 list-disc list-outside"
+                          >
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import {
-  Sparkles,
   ExternalLink,
   Copy,
   Check,
@@ -22,18 +21,13 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
   className = '',
   onSuccess,
 }) => {
-  const { loginWithGooglePopup, loginWithGoogleMock } = useAuth();
+  const { loginWithGooglePopup } = useAuth();
   const { showToast } = useToast();
 
   const [isLoading, setIsLoading] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [copiedDev, setCopiedDev] = useState(false);
   const [copiedShared, setCopiedShared] = useState(false);
-
-  // Custom demo Google account fields
-  const [demoEmail, setDemoEmail] = useState('recobocil.art@gmail.com');
-  const [demoName, setDemoName] = useState('Recobocil Art');
-  const [isSubmittingMock, setIsSubmittingMock] = useState(false);
 
   const devCallback = 'https://ais-dev-psthdo7fwdvzivkaczrcnn-194164145577.asia-southeast1.run.app/auth/callback';
   const sharedCallback = 'https://ais-pre-psthdo7fwdvzivkaczrcnn-194164145577.asia-southeast1.run.app/auth/callback';
@@ -64,32 +58,6 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
       showToast(err.message || 'Gagal memulai autentikasi Google.', 'error');
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleSimulatedGoogleAuth = async () => {
-    if (!demoEmail) {
-      showToast('Email akun Google wajib diisi.', 'error');
-      return;
-    }
-
-    setIsSubmittingMock(true);
-    try {
-      const res = await loginWithGoogleMock(demoEmail, demoName);
-      if (res.success) {
-        setShowConfigModal(false);
-        showToast(
-          res.message || (mode === 'register' ? 'Akun Google berhasil terdaftar!' : 'Berhasil masuk dengan akun Google!'),
-          'success'
-        );
-        onSuccess?.();
-      } else {
-        showToast(res.message || 'Gagal melakukan login simulasi Google.', 'error');
-      }
-    } catch (err: any) {
-      showToast(err.message || 'Terjadi kesalahan saat memproses akun Google.', 'error');
-    } finally {
-      setIsSubmittingMock(false);
     }
   };
 
@@ -173,69 +141,25 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
               </div>
             </div>
 
-            {/* Quick 1-Click Sandbox Login */}
-            <div className="p-4 rounded-xl bg-sky-50/80 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800/80 mb-5">
-              <div className="flex items-start gap-2.5 mb-3">
-                <Sparkles className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
+            <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 mb-5">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="text-xs font-bold text-sky-900 dark:text-sky-200">
-                    Coba Langsung dengan Akun Google Anda
+                  <h4 className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                    Kredensial Google OAuth Belum Dikonfigurasi
                   </h4>
-                  <p className="text-[11px] text-sky-700/80 dark:text-sky-300/80 leading-relaxed">
-                    Uji coba registrasi & login akun Google secara instan di lingkungan preview tanpa konfigurasi kunci API eksternal.
+                  <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80 leading-relaxed mt-1">
+                    Untuk mengaktifkan autentikasi akun Google resmi, masukkan <code className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono text-[10px]">GOOGLE_CLIENT_ID</code> dan <code className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono text-[10px]">GOOGLE_CLIENT_SECRET</code> di menu Settings.
                   </p>
                 </div>
-              </div>
-
-              <div className="space-y-2.5">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                    Email Akun Google
-                  </label>
-                  <input
-                    type="email"
-                    value={demoEmail}
-                    onChange={(e) => setDemoEmail(e.target.value)}
-                    placeholder="nama@gmail.com"
-                    className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                    Nama Akun Google
-                  </label>
-                  <input
-                    type="text"
-                    value={demoName}
-                    onChange={(e) => setDemoName(e.target.value)}
-                    placeholder="Nama Lengkap"
-                    className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleSimulatedGoogleAuth}
-                  disabled={isSubmittingMock}
-                  className="w-full mt-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-60"
-                >
-                  {isSubmittingMock ? (
-                    <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <Sparkles className="w-3.5 h-3.5" />
-                  )}
-                  <span>
-                    {mode === 'register' ? 'Daftar Sekarang dengan Akun Google Ini' : 'Masuk Sekarang dengan Akun Google Ini'}
-                  </span>
-                </button>
               </div>
             </div>
 
             {/* Production Credentials Configuration Info */}
             <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
-                <span>Konfigurasi Google Cloud Console (Opsional)</span>
+                <ShieldCheck className="w-3.5 h-3.5 text-sky-500" />
+                <span>Langkah Pendaftaran di Google Cloud Console</span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 leading-relaxed">
                 Untuk menghubungkan langsung ke login pop-up resmi Google, tambahkan <code className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono text-[10px]">GOOGLE_CLIENT_ID</code> dan <code className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono text-[10px]">GOOGLE_CLIENT_SECRET</code> pada menu Settings. Daftarkan URL berikut sebagai Authorized Redirect URI:
