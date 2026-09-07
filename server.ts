@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import authRoutes from './server/routes/authRoutes';
 import transactionRoutes from './server/routes/transactionRoutes';
@@ -80,13 +79,27 @@ app.get('/api/health', (req, res) => {
 // Centralized Error Handling Middleware for API routes
 app.use('/api', errorHandler);
 
-// 3. Vite Middleware (Development) / Static Files (Production)
+// 3. Frontend serving + HTTP listener.
+// Only used when running as a long-lived process (local dev, Docker, VPS).
+// On Vercel the frontend is served as static files by the CDN and this module
+// is imported by api/index.ts as a serverless handler, so nothing below runs.
+function serveStaticFrontend() {
+  const distPath = path.join(process.cwd(), 'dist');
+  app.use(express.static(distPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
+
 async function startServer() {
   const isDev = process.env.NODE_ENV === 'development';
   const isProductionBundle = typeof __filename !== 'undefined' && __filename.endsWith('.cjs');
 
   if (isDev && !isProductionBundle) {
     try {
+      // Vite is a dev-only dependency; load it lazily so it is never evaluated
+      // in production and never pulled into a serverless bundle.
+      const { createServer: createViteServer } = await import('vite');
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: 'spa',
@@ -94,28 +107,20 @@ async function startServer() {
       app.use(vite.middlewares);
     } catch (e) {
       console.warn('Vite dev middleware not available, falling back to static files.');
-      const distPath = path.join(process.cwd(), 'dist');
-      app.use(express.static(distPath));
-      app.get('*', (req, res) => {
-        res.sendFile(path.join(distPath, 'index.html'));
-      });
+      serveStaticFrontend();
     }
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    serveStaticFrontend();
   }
 
-  if (process.env.NODE_ENV !== 'production') {
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 FinTrack server is running on http://0.0.0.0:${PORT}`);
-    });
-  }
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 FinTrack server is running on http://0.0.0.0:${PORT}`);
+  });
 }
 
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+const isServerless = Boolean(process.env.VERCEL);
+
+if (!isServerless) {
   startServer();
 }
 
