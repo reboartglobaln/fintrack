@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import http from 'http';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import authRoutes from './server/routes/authRoutes';
@@ -82,9 +83,16 @@ app.use('/api', errorHandler);
 
 // 3. Vite Middleware (Development) / Static Files (Production)
 async function startServer() {
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        // Attach the HMR WebSocket to the Express HTTP server so it shares
+        // port 3000 instead of opening a separate port the preview proxy cannot reach.
+        hmr: { server: httpServer },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -96,7 +104,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 FinTrack server is running on http://0.0.0.0:${PORT}`);
   });
 }
