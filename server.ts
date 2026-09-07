@@ -29,9 +29,9 @@ testDbConnection();
 
 // 1. Security & Core Middlewares
 app.use((req, res, next) => {
-  // Prevent MIME-sniffing and cross-site scripting
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   // Allow iframe embedding specifically for the AI Studio live preview container
   res.removeHeader('X-Frame-Options');
   next();
