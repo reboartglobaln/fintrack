@@ -3,6 +3,10 @@
  * Supports Local Development, Docker, Supabase, AWS RDS, & Production Pooling
  */
 import { Sequelize } from 'sequelize';
+// Sequelize resolves its driver with a dynamic `require(dialectName)`, which
+// serverless bundlers cannot trace, so `pg` is left out of the deployed function.
+// Importing it statically and passing it as `dialectModule` makes it traceable.
+import pg from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -22,6 +26,7 @@ const sslEnabled =
 export const sequelize = databaseUrl
   ? new Sequelize(databaseUrl, {
       dialect: 'postgres',
+      dialectModule: pg,
       logging: false,
       pool: {
         max: 10,
@@ -42,6 +47,7 @@ export const sequelize = databaseUrl
       host: dbHost,
       port: dbPort,
       dialect: 'postgres',
+      dialectModule: pg,
       logging: isProduction ? false : (msg) => console.log(`[Sequelize] ${msg}`),
       pool: {
         max: 10,
